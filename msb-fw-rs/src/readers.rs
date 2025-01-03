@@ -7,29 +7,27 @@ use embassy_stm32::{
 };
 use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel::Sender};
 use embassy_time::{Delay, Duration, Timer};
-use sht3x_ner::Repeatability;
 
 use crate::SharedI2c3;
 
-const TEMPERATURE_REFRESH_TIME: Duration = Duration::from_millis(500);
-const TEMPERATURE_SEND_MSG_ID: StandardId = StandardId::new(0x602).expect("Could not parse ID");
-
+#[cfg(feature = "temp-sensor")]
 #[embassy_executor::task]
 pub async fn temperature_reader(
     i2c: &'static SharedI2c3,
     can_send: Sender<'static, ThreadModeRawMutex, Frame, 25>,
 ) {
+    use sht3x_ner::{ClockStretch, Repeatability, Sht3x};
+
+    const TEMPERATURE_REFRESH_TIME: Duration = Duration::from_millis(500);
+    const TEMPERATURE_SEND_MSG_ID: StandardId = StandardId::new(0x602).expect("Could not parse ID");
+
     let i2c_dev = I2cDevice::new(i2c);
-    let mut sht30 = sht3x_ner::Sht3x::new(i2c_dev, sht3x_ner::Address::High);
+    let mut sht30 = Sht3x::new(i2c_dev, sht3x_ner::Address::High);
 
     loop {
         Timer::after(TEMPERATURE_REFRESH_TIME).await;
         let Ok(res) = sht30
-            .measure(
-                sht3x_ner::ClockStretch::Disabled,
-                Repeatability::High,
-                &mut Delay,
-            )
+            .measure(ClockStretch::Disabled, Repeatability::High, &mut Delay)
             .await
         else {
             warn!("Could not get temperature");
@@ -41,25 +39,32 @@ pub async fn temperature_reader(
         bits[..2].copy_from_slice(&temp);
         bits[2..].copy_from_slice(&humidity);
 
-        trace!("Sending temp: {}, humidity {}", res.temperature, res.humidity);
+        trace!(
+            "Sending temp: {}, humidity {}",
+            res.temperature,
+            res.humidity
+        );
         let frame =
             Frame::new_data(TEMPERATURE_SEND_MSG_ID, &bits).expect("Could not create frame");
         can_send.send(frame).await;
     }
 }
 
-const LSM6DSO_ADDR: u8 = 0x6A;
-const IMU_REFRESH_TIME: Duration = Duration::from_millis(500);
-const IMU_SEND_MSG_ID: StandardId = StandardId::new(0x603).expect("Could not parse ID");
-const GYRO_SEND_MSG_ID: StandardId = StandardId::new(0x604).expect("Could not parse ID");
-
+#[cfg(feature = "imu-sensor")]
 #[embassy_executor::task]
 pub async fn imu_reader(
     i2c: &'static SharedI2c3,
     can_send: Sender<'static, ThreadModeRawMutex, Frame, 25>,
 ) {
+    use lsm6dso_ner::Lsm6dso;
+
+    const LSM6DSO_ADDR: u8 = 0x6A;
+    const IMU_REFRESH_TIME: Duration = Duration::from_millis(500);
+    const IMU_SEND_MSG_ID: StandardId = StandardId::new(0x603).expect("Could not parse ID");
+    const GYRO_SEND_MSG_ID: StandardId = StandardId::new(0x604).expect("Could not parse ID");
+
     let i2c_dev = I2cDevice::new(i2c);
-    let Ok(mut lsm6dso) = lsm6dso_ner::Lsm6dso::new(i2c_dev, LSM6DSO_ADDR).await else {
+    let Ok(mut lsm6dso) = Lsm6dso::new(i2c_dev, LSM6DSO_ADDR).await else {
         warn!("Could not initialize lsm6dso!");
         return;
     };
@@ -99,16 +104,19 @@ pub async fn imu_reader(
     }
 }
 
-const TOF_REFRESH_TIME: Duration = Duration::from_millis(500);
-const TOF_SEND_MSG_ID: StandardId = StandardId::new(0x607).expect("Could not parse ID");
-
+#[cfg(feature = "tof-sensor")]
 #[embassy_executor::task]
 pub async fn tof_reader(
     i2c: &'static SharedI2c3,
     can_send: Sender<'static, ThreadModeRawMutex, Frame, 25>,
 ) {
+    use vl6180x_ner::VL6180X;
+
+    const TOF_REFRESH_TIME: Duration = Duration::from_millis(500);
+    const TOF_SEND_MSG_ID: StandardId = StandardId::new(0x607).expect("Could not parse ID");
+
     let i2c_dev = I2cDevice::new(i2c);
-    let Ok(mut vl6180x) = vl6180x_ner::VL6180X::new(i2c_dev).await else {
+    let Ok(mut vl6180x) = VL6180X::new(i2c_dev).await else {
         warn!("Could not initialize lsm6dso!");
         return;
     };
@@ -137,7 +145,7 @@ pub async fn adc1_reader(
     mut adc1: RingBufferedAdc<'static, ADC1>,
     can_send: Sender<'static, ThreadModeRawMutex, Frame, 25>,
 ) {
-    let mut measurements: [u16; 60] = [0u16; 120 / 2];
+    let mut measurements = [0u16; 512];
     let mut strain_bits: [u8; 4] = [0; 4];
 
     loop {

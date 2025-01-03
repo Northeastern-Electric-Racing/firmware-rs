@@ -20,10 +20,10 @@ jobs:
            with:
             submodules: recursive
          - name: Build
-           run: cargo build --verbose --workspace
+           run: cargo build --verbose --workspace --all --all-features
         #  - name: Test
         #    run: cargo test --verbose
          - name: Clippy
-           run: cargo clippy --all-features --workspace
+           run: cargo clippy --all-features --all --workspace
          - name: Format
            run: cargo fmt --verbose --all --check

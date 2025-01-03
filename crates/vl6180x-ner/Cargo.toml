@@ -6,4 +6,5 @@ edition = "2021"
 [dependencies]
 embedded-hal-async.workspace = true
 embedded-hal.workspace = true
-int-enum = {version = "0.4.0", default-features = false}
+int-enum = {version = "1.1.2", default-features = false}
+#int-enum-impl = "0.5.0"

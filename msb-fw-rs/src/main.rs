@@ -4,10 +4,12 @@
 
 use core::fmt::Write;
 
+use cortex_m::{peripheral::SCB, singleton};
+use cortex_m_rt::{exception, ExceptionFrame};
 use defmt::{debug, info, unwrap};
 use embassy_executor::Spawner;
 use embassy_stm32::{
-    adc::Adc,
+    adc::{Adc, SampleTime, Sequence},
     bind_interrupts,
     can::{Can, Rx0InterruptHandler, Rx1InterruptHandler, SceInterruptHandler, TxInterruptHandler},
     i2c::{self, I2c},
@@ -30,7 +32,6 @@ use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
 // here are our interrupts.  Embassy is interrupt by default
-
 bind_interrupts!(struct IrqsCAN {
     CAN1_RX0 => Rx0InterruptHandler<CAN1>;
     CAN1_RX1 => Rx1InterruptHandler<CAN1>;
@@ -58,7 +59,7 @@ static CAN_CHANNEL: Channel<ThreadModeRawMutex, Frame, 25> = Channel::new();
 async fn main(spawner: Spawner) -> ! {
     info!("Initializing MSB-FW...");
     // initialize the project, ensure we can debug during sleep
-    let p = embassy_stm32::init(Config::default());
+    let mut p = embassy_stm32::init(Config::default());
 
     // create some GPIO on input mode and read from them
     let pin0 = Input::new(p.PC10, Pull::None);
@@ -104,20 +105,26 @@ async fn main(spawner: Spawner) -> ! {
         i2c::Config::default(),
     );
     let i2c_bus = I2C_BUS.init(Mutex::new(i2c));
+
+    #[cfg(feature = "temp-sensor")]
     spawner.must_spawn(readers::temperature_reader(i2c_bus, CAN_CHANNEL.sender()));
 
+    #[cfg(feature = "tof-sensor")]
+    spawner.must_spawn(readers::tof_reader(i2c_bus, CAN_CHANNEL.sender()));
+
+    #[cfg(feature = "imu-sensor")]
+    spawner.must_spawn(readers::imu_reader(i2c_bus, CAN_CHANNEL.sender()));
+
     // this pretty much straight from docs, adc dma is very new in embassy stm32 hal
-    // const ADC_BUF_SIZE: usize = 1024;
-    // let adc1 = Adc::new(p.ADC1);
-    // let adc_data = singleton!(ADCDAT : [u16; ADC_BUF_SIZE] = [0u16; ADC_BUF_SIZE])
-    //     .expect("Could not init adc buffer");
-    //let mut adc1 = adc1.into_ring_buffered(p.DMA2_CH0, adc_data);
-    // adc1.set_sample_sequence(Sequence::One, &mut p.PA0, SampleTime::CYCLES112); // SHOCKPOT
-    // adc1.set_sample_sequence(Sequence::Two, &mut p.PA5, SampleTime::CYCLES112); // STRAIN 1
-    // adc1.set_sample_sequence(Sequence::Three, &mut p.PA6, SampleTime::CYCLES112); // STRAIN 2
-    // if let Err(err) = spawner.spawn(readers::adc1_reader(adc1, CAN_CHANNEL.sender())) {
-    //     warn!("Could not spawn ADC1 task: {}", err);
-    // }
+    const ADC_BUF_SIZE: usize = 1024;
+    let adc1 = Adc::new(p.ADC1);
+    let adc_data = singleton!(ADCDAT : [u16; ADC_BUF_SIZE] = [0u16; ADC_BUF_SIZE])
+        .expect("Could not init adc buffer");
+    let mut adc1 = adc1.into_ring_buffered(p.DMA2_CH0, adc_data);
+    adc1.set_sample_sequence(Sequence::One, &mut p.PA0, SampleTime::CYCLES112); // SHOCKPOT
+    adc1.set_sample_sequence(Sequence::Two, &mut p.PA5, SampleTime::CYCLES112); // STRAIN 1
+    adc1.set_sample_sequence(Sequence::Three, &mut p.PA6, SampleTime::CYCLES112); // STRAIN 2
+    spawner.must_spawn(readers::adc1_reader(adc1, CAN_CHANNEL.sender()));
 
     let mut usart = Uart::new(
         p.USART2,
@@ -142,14 +149,9 @@ async fn main(spawner: Spawner) -> ! {
     }
 }
 
-// #[exception]
-// unsafe fn HardFault(_frame: &ExceptionFrame) -> ! {
-//     SCB::sys_reset() // <- you could do something other than reset
-// }
-/// Hardfault handler.
-#[cortex_m_rt::exception]
-unsafe fn HardFault(_frame: &cortex_m_rt::ExceptionFrame) -> ! {
-    loop {}
+#[exception]
+unsafe fn HardFault(_frame: &ExceptionFrame) -> ! {
+    SCB::sys_reset() // <- you could do something other than reset
 }
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message

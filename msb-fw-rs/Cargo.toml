@@ -14,8 +14,14 @@ embassy-stm32.workspace = true
 embassy-sync.workspace = true
 embassy-time.workspace = true
 heapless.workspace = true
-lsm6dso-ner = { version = "0.1.0", path = "../crates/lsm6dso-ner" }
+lsm6dso-ner = { version = "0.1.0", path = "../crates/lsm6dso-ner", optional = true }
 panic-probe.workspace = true
-sht3x-ner = { version = "0.1.0", path = "../crates/sht3x-ner" }
+sht3x-ner = { version = "0.1.0", path = "../crates/sht3x-ner", optional = true }
 static_cell.workspace = true
-vl6180x-ner = { version = "0.1.0", path = "../crates/vl6180x-ner" }
+vl6180x-ner = { version = "0.1.0", path = "../crates/vl6180x-ner", optional = true }
+
+[features]
+default = ["temp-sensor", "imu-sensor"]
+tof-sensor =  ["dep:vl6180x-ner"]
+temp-sensor = ["dep:sht3x-ner"]
+imu-sensor = ["dep:lsm6dso-ner"]

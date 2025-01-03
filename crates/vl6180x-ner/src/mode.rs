@@ -33,7 +33,6 @@ pub trait AllowReadMeasurement {}
 
 /// Operating modes with this trait have an implementation for starting a single
 /// ambient light measurement
-
 pub trait AllowStartAmbientSingle {}
 
 /// Operating modes with this trait have an implementation for starting a single
