@@ -10,8 +10,8 @@ use embedded_hal_async::i2c::I2c;
 pub use powered_off::*;
 pub use ready::*;
 
-use crate::error::Error;
 use crate::VL6180X;
+use crate::error::Error;
 
 impl<MODE, I2C, E> VL6180X<MODE, I2C>
 where
@@ -93,12 +93,12 @@ where
     ///
     /// Does not return the result. To get the measured value the host has the following options:
     /// 1. Check regularly to see if the result is ready with [`read_ambient_lux`](VL6180X::read_ambient_lux)
-    ///     or [`read_ambient`](VL6180X::read_ambient)
+    ///    or [`read_ambient`](VL6180X::read_ambient)
     /// 2. Call [`read_ambient_lux_blocking`](VL6180X::read_ambient_lux_blocking) or
-    ///     [`read_ambient_blocking`](VL6180X::read_ambient_blocking) to have the driver
-    ///     perform the regular checks in a blocking way.
+    ///    [`read_ambient_blocking`](VL6180X::read_ambient_blocking) to have the driver
+    ///    perform the regular checks in a blocking way.
     /// 3. Wait for the ambient interrupt to be triggered, indicating that the
-    ///     new sample is ready, then call the methods listed in option 1.
+    ///    new sample is ready, then call the methods listed in option 1.
     pub async fn start_ambient_single(&mut self) -> Result<(), Error<E>> {
         self.start_ambient_single_direct().await?;
         Ok(())
@@ -115,9 +115,9 @@ where
     /// Does not return the result. To get the measured value the host has the following options:
     /// 1. Check regularly to see if the result is ready with [`read_range_mm()`](VL6180X::read_range_mm)
     /// 2. Call [`read_range_mm_blocking()`](VL6180X::read_range_mm_blocking) to have the driver
-    ///     perform the regular checks in a blocking way.
+    ///    perform the regular checks in a blocking way.
     /// 3. Wait for the range interrupt to be triggered, indicating that the
-    ///     new sample is ready, then call [`read_range_mm()`](VL6180X::read_range_mm).
+    ///    new sample is ready, then call [`read_range_mm()`](VL6180X::read_range_mm).
     pub async fn start_range_single(&mut self) -> Result<(), Error<E>> {
         self.start_range_single_direct().await?;
         Ok(())

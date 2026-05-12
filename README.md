@@ -21,13 +21,13 @@ To lint and check stuff, run `cargo clippy`.
 ###  On car stuff
 
 To run a RTT terminal dedicated:
-`cargo embed --release --config rtt`
+`cargo embed --release rtt`
 
 To run a GDB terminal dedicated:
-`cargo embed --release --config gdb`
+`cargo embed --release gdb`
 
 To flash and leave code:
-`cargo embed --release --config `
+`cargo embed --release`
 
 
 
@@ -56,3 +56,14 @@ This structure has multiple benefits, including:
 - Shared `target` folder meaning a shared build cache for quicker and space-saving builds
 - Other quirks, such as vscode `settings.json` and `config.toml`, are shared between projects
 
+
+### Versioning
+
+Updating versions is as follows
+
+1. Update the rust-toolchain to the version found in embassy repo
+2. Update all embassy versions to the versions found in the embassy repo, use x.y.z, in main Cargo.toml
+3. Update all features, especially ones that say the version in them (ex. "defmt-03")
+3. Update major package versions of other projects, use x.y, in main Cargo.toml
+4. Update package versions of other projects, in individual Cargo.toml
+4. Fix any build issues

@@ -1,5 +1,5 @@
 # The channel key should match the nightly rust-toolchain.toml in the embassy repo
 [toolchain]
-channel = "nightly-2024-12-10"
-components = [ "rust-src", "rustfmt", "llvm-tools", "miri" ]
+channel = "1.92"
+components = [ "rust-src", "rustfmt", "llvm-tools" ]
 targets = [ "thumbv7em-none-eabi" ]

@@ -1,5 +1,4 @@
 #![no_std]
-#![feature(impl_trait_in_assoc_type)]
 
 // declare all files in this project except main
 pub mod can_handler;
@@ -12,7 +11,7 @@ pub mod readers;
 // dont import anything in a lib.rs file, instead use fully resolved definitions
 pub type SharedI2c3 = embassy_sync::mutex::Mutex<
     embassy_sync::blocking_mutex::raw::NoopRawMutex,
-    embassy_stm32::i2c::I2c<'static, embassy_stm32::mode::Async>,
+    embassy_stm32::i2c::I2c<'static, embassy_stm32::mode::Async, embassy_stm32::i2c::Master>,
 >;
 #[derive(Clone, defmt::Format)]
 pub enum DeviceLocation {

@@ -1,7 +1,7 @@
 use embedded_hal::digital::OutputPin;
 use embedded_hal_async::i2c::I2c;
 
-use crate::{error::Error2, VL6180X};
+use crate::{VL6180X, error::Error2};
 
 use super::ReadyMode;
 
