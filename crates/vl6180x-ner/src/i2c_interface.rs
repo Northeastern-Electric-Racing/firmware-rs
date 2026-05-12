@@ -1,7 +1,7 @@
 use embedded_hal_async::i2c::I2c;
 
 use super::*;
-use crate::register::{Register16Bit, Register8Bit};
+use crate::register::{Register8Bit, Register16Bit};
 
 impl<MODE, I2C, E> VL6180X<MODE, I2C>
 where

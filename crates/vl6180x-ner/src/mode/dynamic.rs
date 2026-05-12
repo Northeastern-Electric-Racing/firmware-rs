@@ -1,8 +1,8 @@
-use crate::error::{Error, Error2};
 use crate::VL6180X;
+use crate::error::{Error, Error2};
+use OperatingMode::*;
 use embedded_hal::digital::OutputPin;
 use embedded_hal_async::i2c::I2c;
-use OperatingMode::*;
 
 /// A mode where the state is kept track of at runtime, instead of being
 /// encoded into the type. Thus allowing you to change the mode often,

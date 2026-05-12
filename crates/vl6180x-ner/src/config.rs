@@ -139,7 +139,7 @@ impl Config {
     pub fn set_range_inter_measurement_period(&mut self, time_ms: u16) -> Result<(), Error<()>> {
         let min_eq_val = ((self.range_max_convergence_time + 5) as f32 / 0.9) as u16;
         let min = if 10 < min_eq_val { min_eq_val } else { 10 };
-        if time_ms % 10 != 0 || time_ms < min || time_ms > 2550 {
+        if !time_ms.is_multiple_of(10) || time_ms < min || time_ms > 2550 {
             return Err(Error::InvalidConfigurationValue(time_ms));
         }
         self.range_inter_measurement_period = time_ms;
@@ -257,7 +257,7 @@ impl Config {
     pub fn set_ambient_inter_measurement_period(&mut self, time_ms: u16) -> Result<(), Error<()>> {
         let min_eq_val = ((self.ambient_integration_period as f32 * 1.1) / 0.9) as u16;
         let min = if 10 < min_eq_val { min_eq_val } else { 10 };
-        if time_ms % 10 != 0 || time_ms < min || time_ms > 2560 {
+        if !time_ms.is_multiple_of(10) || time_ms < min || time_ms > 2560 {
             return Err(Error::InvalidConfigurationValue(time_ms));
         }
         self.ambient_inter_measurement_period = time_ms;

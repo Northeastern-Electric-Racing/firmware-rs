@@ -2,8 +2,8 @@ use embedded_hal_async::i2c::I2c;
 
 use super::VL6180X;
 use crate::register::{
-    Register16Bit::*, Register8Bit::*, SysModeGpio1Polarity, SysModeGpio1Select,
-    AMBIENT_ANALOGUE_GAIN_CODE, RANGE_SCALAR_CODE,
+    AMBIENT_ANALOGUE_GAIN_CODE, RANGE_SCALAR_CODE, Register8Bit::*, Register16Bit::*,
+    SysModeGpio1Polarity, SysModeGpio1Select,
 };
 
 impl<MODE, I2C, E> VL6180X<MODE, I2C>

@@ -13,7 +13,7 @@ pub async fn control_leds(
 ) {
     let mut i = 0u8;
     loop {
-        if i % 8 == 0 {
+        if i.is_multiple_of(8) {
             match device_loc {
                 DeviceLocation::FrontLeft => {
                     led1.set_low();

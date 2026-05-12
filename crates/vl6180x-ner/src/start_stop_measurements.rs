@@ -1,9 +1,9 @@
 use embedded_hal_async::i2c::I2c;
 
 use crate::{
+    VL6180X,
     error::Error,
     register::{InterleavedModeEnableCode, Register8Bit, SysAmbientStartCode, SysRangeStartCode},
-    VL6180X,
 };
 
 impl<MODE, I2C, E> VL6180X<MODE, I2C>

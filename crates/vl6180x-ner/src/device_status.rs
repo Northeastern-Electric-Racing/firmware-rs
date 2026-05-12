@@ -95,10 +95,10 @@ where
 
     async fn wait_device_booted(&mut self) -> Result<(), E> {
         loop {
-            if let Ok(result) = self.read_named_register(SYSTEM__FRESH_OUT_OF_RESET).await {
-                if result == 0x01 {
-                    break;
-                }
+            if let Ok(result) = self.read_named_register(SYSTEM__FRESH_OUT_OF_RESET).await
+                && result == 0x01
+            {
+                break;
             }
         }
         Ok(())

@@ -1,7 +1,7 @@
 use embedded_hal_async::i2c::I2c;
 
-use crate::{error::Error, Config};
 use crate::{AllowCommunication, VL6180X};
+use crate::{Config, error::Error};
 
 use super::{
     AllowReadMeasurement, AllowStartAmbientSingle, AllowStartRangeSingle, AmbientContinuousMode,

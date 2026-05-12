@@ -22,7 +22,7 @@ pub async fn temperature_reader(
     const TEMPERATURE_SEND_MSG_ID: StandardId = StandardId::new(0x602).expect("Could not parse ID");
 
     let i2c_dev = I2cDevice::new(i2c);
-    let mut sht30 = Sht3x::new(i2c_dev, sht3x_ner::Address::High);
+    let mut sht30 = Sht3x::new(i2c_dev, sht3x_ner::Address::Low);
 
     loop {
         Timer::after(TEMPERATURE_REFRESH_TIME).await;
@@ -41,8 +41,7 @@ pub async fn temperature_reader(
 
         trace!(
             "Sending temp: {}, humidity {}",
-            res.temperature,
-            res.humidity
+            res.temperature, res.humidity
         );
         let frame =
             Frame::new_data(TEMPERATURE_SEND_MSG_ID, &bits).expect("Could not create frame");
@@ -136,7 +135,7 @@ pub async fn tof_reader(
     }
 }
 
-const ADC_REFRESH_TIME: Duration = Duration::from_millis(250);
+const ADC_REFRESH_TIME: Duration = Duration::from_millis(1000);
 const STRAIN_SEND_MSG_ID: StandardId = StandardId::new(0x606).expect("Could not parse ID");
 const SHOCKPOT_SEND_MSG_ID: StandardId = StandardId::new(0x605).expect("Could not parse ID");
 
@@ -149,28 +148,21 @@ pub async fn adc1_reader(
     let mut strain_bits: [u8; 4] = [0; 4];
 
     loop {
-        match adc1.read(&mut measurements).await {
-            Ok(_) => {
-                adc1.teardown_adc();
-                trace!("Sending strain + shockpot: {}", measurements);
-                // TODO transform measurements
-                strain_bits[0..2].copy_from_slice(&measurements[1].to_be_bytes());
-                strain_bits[2..4].copy_from_slice(&measurements[2].to_be_bytes());
-                can_send
-                    .send(unwrap!(Frame::new_data(
-                        STRAIN_SEND_MSG_ID,
-                        &measurements[0].to_be_bytes()
-                    )))
-                    .await;
-                can_send
-                    .send(unwrap!(Frame::new_data(SHOCKPOT_SEND_MSG_ID, &strain_bits)))
-                    .await;
-            }
-            Err(_) => {
-                warn!("DMA overrun");
-                continue;
-            }
-        }
+        adc1.read_latest(&mut measurements);
+        trace!("Sending strain + shockpot: {}", measurements);
+        // TODO transform measurements
+        strain_bits[0..2].copy_from_slice(&measurements[1].to_be_bytes());
+        strain_bits[2..4].copy_from_slice(&measurements[2].to_be_bytes());
+        can_send
+            .send(unwrap!(Frame::new_data(
+                STRAIN_SEND_MSG_ID,
+                &measurements[0].to_be_bytes()
+            )))
+            .await;
+        can_send
+            .send(unwrap!(Frame::new_data(SHOCKPOT_SEND_MSG_ID, &strain_bits)))
+            .await;
+
         Timer::after(ADC_REFRESH_TIME).await;
     }
 }

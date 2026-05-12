@@ -3,12 +3,12 @@ use core::convert::TryFrom;
 use embedded_hal_async::i2c::I2c;
 
 use crate::{
+    VL6180X,
     error::Error,
     register::{
-        self, AmbientStatusErrorCode, RangeStatusErrorCode, Register16Bit, Register8Bit,
+        self, AmbientStatusErrorCode, RangeStatusErrorCode, Register8Bit, Register16Bit,
         ResultInterruptStatusGpioCode,
     },
-    VL6180X,
 };
 
 impl<MODE, I2C, E> VL6180X<MODE, I2C>
