@@ -1,34 +1,23 @@
-# MSB-FW.rs
-Mechanical Sensor Board Firmware in Rust (experimental, not for usage on car)
+# firmware-rs
+NER Firmware in Rust (experimental, not for usage on car)
 
 
-### Commands
+## Setup
 
-First, [get rustup](https://www.rust-lang.org/learn/get-started).
+1. [get rustup](https://www.rust-lang.org/learn/get-started).
+2. clone and open this root folder.
+3. [get probe-rs](https://probe.rs/docs/getting-started/installation/).
 
-Second, clone and open this root folder.
+## Commands
 
-To build `msb-fw-rs`, just run `cargo build --release`.  Note the first time you do this it will take a while, as `rustup` has to install the correct version of rust for this project.
-
-To deploy onto an embedded chip locally connected, run `cargo run --release`.
-
-To build a different project other than `msb-fw-rs` (of which none exist), cd into that directory and run build.
-
-To format, run `cargo format`. 
-
-To lint and check stuff, run `cargo clippy`.
-
-###  On car stuff
-
-To run a RTT terminal dedicated:
-`cargo embed --release rtt`
-
-To run a GDB terminal dedicated:
-`cargo embed --release gdb`
-
-To flash and leave code:
-`cargo embed --release`
-
+- To enter a project: `cd ./projects/project-name`
+- To build: `cargo build`
+- To deploy onto an embedded chip locally connected, run `cargo run --release`.
+- To format, run `cargo format`. 
+- To lint and check stuff, run `cargo clippy`.
+- To run a RTT terminal dedicated: `cargo embed --release rtt`
+- To run a GDB terminal dedicated: `cargo embed --release gdb`
+- To flash and leave code: `cargo embed --release`
 
 
 ### Coding tips and tricks
@@ -36,19 +25,22 @@ To flash and leave code:
 - Use defmt macros to print stuff
 - 
 
+### IDE Stuff
+
+There are currently custom rust-analyzer settings for VSCode and zed.  Feel free to adapt them to your own liking.
 
 
-### Repository structure
+## Repository structure
 
-This is a mega-repo configured as a normal embassy-styled project with multiple dependency crates and sub-projects.
+This is a mono-repo configured as a normal embassy-styled project with multiple dependency crates and sub-projects.
 
 Various files:
 
-Top level `Cargo.toml`, `Embed.toml`, and `rust-toolchain.toml` define the various parts of the embassy project.  See comments inside for how these were structure, but most follow embassy specification.
+Top level `Cargo.toml` and `rust-toolchain.toml` define the various parts of the embassy project.  See comments inside for how these were structure, but most follow embassy specification.
 
 The `crates` folder defines drivers or other code shared between projects.
 
-Top level folders like `msb-fw-rs`, and any other project, define projects which inherit explicity defined `Cargo.toml` dependencies and `Embed.toml` settings, and more.  They can also depend on a crate in the `crates` folder.
+The `projects` folder defines individual board-specific compilation units which inherit explicity defined `Cargo.toml` dependencies and `Embed.toml` settings, and more.  They can also depend on a crate in the `crates` folder.  Notably, they all may have individual `.config/cargo.toml` if they override anything.
 
 This structure has multiple benefits, including:
 - Static versioning of all embassy and other dependencies, eliminating version conflicts for in-tree code
@@ -57,7 +49,7 @@ This structure has multiple benefits, including:
 - Other quirks, such as vscode `settings.json` and `config.toml`, are shared between projects
 
 
-### Versioning
+### Upgrades of Embassy/Dep versions
 
 Updating versions is as follows
 

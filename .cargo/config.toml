@@ -1,12 +1,16 @@
-[target.'cfg(all(target_arch = "arm", target_os = "none"))']
+[target.thumbv8m.main-none-eabihf]
+runner = 'probe-rs run --chip STM32H563ZITx'
+
+[target.thumbv7em-none-eabi]
 runner = 'probe-rs run --chip STM32F405RGTx'
 
-[build]
-target = "thumbv7em-none-eabi"
-
 [env]
-DEFMT_LOG = "info"
+DEFMT_LOG = "warn"
+
+# these are all so the workspace can work cohesively, and should not affect code stability
+
+[resolver]
+feature-unification = "package"
 
 [unstable]
-build-std-features = ["panic_immediate_abort"]
-build-std = ["core"]
+feature-unification = true # for having a variety of features, ex stm32-metapac we cannot enable two different stm32's

@@ -19,7 +19,7 @@ pub async fn state_handler(
     tsms_status: &'static AtomicBool,
 ) {
     let mut prev_func_state = FunctionalType::READY;
-    let mut prev_nero_state = NeroType::OFF;
+    //let mut prev_nero_state = NeroType::OFF;
 
     loop {
         let new_state = state_recv.wait().await;
@@ -80,7 +80,7 @@ pub async fn state_handler(
 
         match new_state {
             StateTransition::Functional(f) => prev_func_state = f,
-            StateTransition::Nero(n) => prev_nero_state = n,
+            StateTransition::Nero(_) => (), //prev_nero_state = n,
         }
     }
 }

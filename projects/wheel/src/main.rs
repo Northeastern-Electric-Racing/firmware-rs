@@ -1,7 +1,5 @@
 #![no_std]
 #![no_main]
-#![feature(impl_trait_in_assoc_type)]
-#![feature(const_option)]
 
 use cortex_m::peripheral::SCB;
 use cortex_m_rt::{exception, ExceptionFrame};
@@ -14,8 +12,10 @@ use embassy_stm32::{
         Can, Frame, Rx0InterruptHandler, Rx1InterruptHandler, SceInterruptHandler, StandardId,
         TxInterruptHandler,
     },
+    exti,
     exti::ExtiInput,
     gpio::Level,
+    interrupt,
     peripherals::CAN1,
 };
 use embassy_stm32::{
@@ -36,6 +36,25 @@ bind_interrupts!(struct IrqsCAN {
 
 bind_interrupts!(struct IrqsUsart {
     USART2 => usart::InterruptHandler<peripherals::USART2>;
+});
+
+bind_interrupts!(struct IrqsExti4 {
+    EXTI4 => exti::InterruptHandler<interrupt::typelevel::EXTI4>;
+});
+bind_interrupts!(struct IrqsExti5 {
+    EXTI9_5 => exti::InterruptHandler<interrupt::typelevel::EXTI9_5>;
+});
+bind_interrupts!(struct IrqsExti0 {
+    EXTI0 => exti::InterruptHandler<interrupt::typelevel::EXTI0>;
+});
+bind_interrupts!(struct IrqsExti1 {
+    EXTI1 => exti::InterruptHandler<interrupt::typelevel::EXTI1>;
+});
+bind_interrupts!(struct IrqsExti2 {
+    EXTI2 => exti::InterruptHandler<interrupt::typelevel::EXTI2>;
+});
+bind_interrupts!(struct IrqsExti3 {
+    EXTI3 => exti::InterruptHandler<interrupt::typelevel::EXTI3>;
 });
 
 const SEND_MSG_ID: StandardId = StandardId::new(0x680).expect("Could not parse ID");
@@ -69,12 +88,12 @@ async fn main(_spawner: Spawner) -> ! {
     // core::write!(&mut s, "Hello DMA World!\r\n",).unwrap();
     // unwrap!(usart.write(s.as_bytes()).await);
 
-    let mut button1 = ExtiInput::new(p.PA1, p.EXTI1, embassy_stm32::gpio::Pull::Up);
-    let mut button2 = ExtiInput::new(p.PA2, p.EXTI2, embassy_stm32::gpio::Pull::Up);
-    let mut button3 = ExtiInput::new(p.PA3, p.EXTI3, embassy_stm32::gpio::Pull::Up);
-    let mut button4 = ExtiInput::new(p.PA4, p.EXTI4, embassy_stm32::gpio::Pull::Up);
-    let mut button5 = ExtiInput::new(p.PC5, p.EXTI5, embassy_stm32::gpio::Pull::Up);
-    let mut button6 = ExtiInput::new(p.PC6, p.EXTI6, embassy_stm32::gpio::Pull::Up);
+    let mut button1 = ExtiInput::new(p.PA1, p.EXTI1, embassy_stm32::gpio::Pull::Up, IrqsExti1);
+    let mut button2 = ExtiInput::new(p.PA2, p.EXTI2, embassy_stm32::gpio::Pull::Up, IrqsExti2);
+    let mut button3 = ExtiInput::new(p.PA3, p.EXTI3, embassy_stm32::gpio::Pull::Up, IrqsExti3);
+    let mut button4 = ExtiInput::new(p.PA4, p.EXTI4, embassy_stm32::gpio::Pull::Up, IrqsExti4);
+    let mut button5 = ExtiInput::new(p.PC5, p.EXTI5, embassy_stm32::gpio::Pull::Up, IrqsExti5);
+    let mut button6 = ExtiInput::new(p.PC6, p.EXTI6, embassy_stm32::gpio::Pull::Up, IrqsExti5);
 
     loop {
         select_array([

@@ -1,6 +1,4 @@
 {
-    "rust-analyzer.checkOnSave.allTargets": false,
-    "rust-analyzer.diagnostics.disabled": [
-            "trait-impl-incorrect-safety"
-        ]
+  "rust-analyzer.cargo.target": "thumbv8m.main-none-eabihf",
+  "rust-analyzer.checkOnSave.allTargets": false,
 }

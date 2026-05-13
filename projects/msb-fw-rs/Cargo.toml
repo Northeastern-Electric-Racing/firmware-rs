@@ -1,7 +1,10 @@
+cargo-features = ["per-package-target"]
+
 [package]
 edition = "2024"
 name = "msb-fw-rs"
 version = "0.1.0"
+forced-target = "thumbv7em-none-eabi"
 
 [dependencies]
 cortex-m.workspace = true
@@ -10,15 +13,15 @@ defmt.workspace = true
 defmt-rtt.workspace = true
 embassy-embedded-hal.workspace = true
 embassy-executor.workspace = true
-embassy-stm32.workspace = true
+embassy-stm32 = { workspace = true, features = ["stm32f405rg"] }
 embassy-sync.workspace = true
 embassy-time.workspace = true
 heapless.workspace = true
-lsm6dso-ner = { version = "0.1.0", path = "../crates/lsm6dso-ner", optional = true }
+lsm6dso-ner = { version = "0.1.0", path = "../../crates/drivers/lsm6dso-ner", optional = true }
 panic-probe.workspace = true
-sht3x-ner = { version = "0.1.0", path = "../crates/sht3x-ner", optional = true }
+sht3x-ner = { version = "0.1.0", path = "../../crates/drivers/sht3x-ner", optional = true }
 static_cell.workspace = true
-vl6180x-ner = { version = "0.1.0", path = "../crates/vl6180x-ner", optional = true }
+vl6180x-ner = { version = "0.1.0", path = "../../crates/drivers/vl6180x-ner", optional = true }
 
 [features]
 default = ["temp-sensor", "imu-sensor"]
