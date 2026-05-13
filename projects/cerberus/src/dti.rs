@@ -18,8 +18,8 @@ pub async fn dti_handler(
     loop {
         let rpm_frame = rpm_recv.wait().await;
         match rpm_frame.id() {
-            embassy_stm32::can::Id::Standard(id) => match id {
-                &DTI_RPM_MSG_ID => {
+            embassy_stm32::can::Id::Standard(id) => {
+                if id == &DTI_RPM_MSG_ID {
                     // TODO fat chance this works
                     let erpm = ((rpm_frame.data()[0] as i32) << 24u32)
                         + ((rpm_frame.data()[1] as i32) << 16)
@@ -32,8 +32,7 @@ pub async fn dti_handler(
                     // TODO add precision
                     speed.store(mph as i32, core::sync::atomic::Ordering::Release);
                 }
-                _ => (),
-            },
+            }
             embassy_stm32::can::Id::Extended(_) => (),
         }
     }

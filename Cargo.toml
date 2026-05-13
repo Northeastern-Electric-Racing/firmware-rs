@@ -1,9 +1,9 @@
 [workspace]
-members = ["msb-fw-rs","crates/*"]
+members = ["projects/*","crates/drivers/*"]
 resolver = "3"
 
 [workspace.dependencies]
-embassy-stm32 = { version = "0.6.0", features = ["defmt", "stm32f405rg", "unstable-pac", "memory-x", "time", "time-driver-any", "exti"] }
+embassy-stm32 = { version = "0.6.0", features = ["defmt", "unstable-pac", "memory-x", "time", "time-driver-any", "exti"] }
 embassy-sync = { version = "0.8.0", features = ["defmt"] }
 embassy-executor = { version = "0.10.0", features = ["executor-thread", "executor-interrupt", "defmt", "embassy-time-driver", "platform-cortex-m"] }
 embassy-time = { version = "0.5.1",  features = ["defmt", "defmt-timestamp-uptime", "tick-hz-32_768"] }

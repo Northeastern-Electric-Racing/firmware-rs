@@ -1,6 +1,4 @@
 #![no_std]
-#![feature(const_option)]
-#![feature(impl_trait_in_assoc_type)]
 
 pub mod bms;
 pub mod can_handler;
@@ -11,7 +9,7 @@ pub mod state_machine;
 
 pub type SharedI2c = embassy_sync::mutex::Mutex<
     embassy_sync::blocking_mutex::raw::NoopRawMutex,
-    embassy_stm32::i2c::I2c<'static, embassy_stm32::mode::Async>,
+    embassy_stm32::i2c::I2c<'static, embassy_stm32::mode::Async, embassy_stm32::i2c::mode::Master>,
 >;
 
 #[derive(Copy, Clone, PartialEq, Eq)]

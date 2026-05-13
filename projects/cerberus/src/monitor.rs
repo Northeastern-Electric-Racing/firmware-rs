@@ -1,13 +1,14 @@
 use core::sync::atomic::AtomicBool;
 
-use bitfield::Bit;
-use defmt::{unwrap, warn};
+use bitfield::{Bit, BitMut};
+use defmt::unwrap;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_futures::select::{self, select3, select_array};
 use embassy_stm32::{
     adc::RingBufferedAdc,
     can::{Frame, StandardId},
     exti::ExtiInput,
+    mode::Async,
     peripherals::ADC1,
 };
 use embassy_sync::{
@@ -31,24 +32,17 @@ pub async fn lv_sense_handler(
     let mut measurements: [u16; 20] = [0u16; 40 / 2];
 
     loop {
-        match adc1.read(&mut measurements).await {
-            Ok(_) => {
-                adc1.teardown_adc();
-                // 8.97 is mahic no. bc nobody remembers the exact resistor config
-                let v_in = (measurements[0] as f32 * 8.967 * 10f32) as u32;
-                // TODO transform measurements
-                can_send
-                    .send(unwrap!(Frame::new_data(
-                        LV_SENSE_MSG_ID,
-                        &v_in.to_be_bytes()
-                    )))
-                    .await;
-            }
-            Err(_) => {
-                warn!("DMA overrun");
-                continue;
-            }
-        }
+        adc1.read_latest(&mut measurements);
+        // 8.97 is mahic no. bc nobody remembers the exact resistor config
+        let v_in = (measurements[0] as f32 * 8.967 * 10f32) as u32;
+        // TODO transform measurements
+        can_send
+            .send(unwrap!(Frame::new_data(
+                LV_SENSE_MSG_ID,
+                &v_in.to_be_bytes()
+            )))
+            .await;
+
         Timer::after(LV_SENSE_REFRESH_TIME).await;
     }
 }
@@ -248,15 +242,15 @@ pub async fn ctrl_expander_handler(
 
 #[embassy_executor::task]
 pub async fn steeringio_handler(
-    can_send: Sender<'static, ThreadModeRawMutex, Frame, 25>,
-    mut button1: ExtiInput<'static>,
-    mut button2: ExtiInput<'static>,
-    mut button3: ExtiInput<'static>,
-    mut button4: ExtiInput<'static>,
+    _can_send: Sender<'static, ThreadModeRawMutex, Frame, 25>,
+    mut button1: ExtiInput<'static, Async>,
+    mut button2: ExtiInput<'static, Async>,
+    mut button3: ExtiInput<'static, Async>,
+    mut button4: ExtiInput<'static, Async>,
     // mut button5: ExtiInput<'static>,
     // mut button6: ExtiInput<'static>,
-    mut button7: ExtiInput<'static>,
-    mut button8: ExtiInput<'static>,
+    mut button7: ExtiInput<'static, Async>,
+    mut button8: ExtiInput<'static, Async>,
 ) {
     loop {
         let ans = select_array([
@@ -271,7 +265,7 @@ pub async fn steeringio_handler(
         ])
         .await;
 
-        let button_value = match ans.1 {
+        let _button_value = match ans.1 {
             0 => button1.get_level(),
             1 => button2.get_level(),
             2 => button3.get_level(),
