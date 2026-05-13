@@ -19,6 +19,8 @@ NER Firmware in Rust (experimental, not for usage on car)
 - To run a GDB terminal dedicated: `cargo embed --release gdb`
 - To flash and leave code: `cargo embed --release`
 
+**At this time, many commands only work consistently inside the project (via `cd`)**
+The workspace's only purpose is to organize dependencies and build artificats, especially for rust-analyzer.
 
 ### Coding tips and tricks
 
