@@ -6,6 +6,7 @@ runner = 'probe-rs run --chip STM32F405RGTx'
 
 [env]
 DEFMT_LOG = "warn"
+PROBE_RS_EMBED_FILE = { value = "Embed.toml", relative = true }
 
 # these are all so the workspace can work cohesively, and should not affect code stability
 
