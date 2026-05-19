@@ -4,8 +4,11 @@ runner = 'probe-rs run --chip STM32H563ZITx'
 [target.thumbv7em-none-eabi]
 runner = 'probe-rs run --chip STM32F405RGTx'
 
+[build]
+target = "thumbv8m.main-none-eabihf"
+
 [env]
-DEFMT_LOG = "warn"
+DEFMT_LOG = "trace"
 PROBE_RS_EMBED_FILE = { value = "Embed.toml", relative = true }
 
 # these are all so the workspace can work cohesively, and should not affect code stability

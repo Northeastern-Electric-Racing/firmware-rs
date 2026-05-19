@@ -68,7 +68,6 @@ async fn main(spawner: Spawner) -> ! {
     info!("Initializing MSB-FW...");
     // initialize the project, ensure we can debug during sleep
     let p = embassy_stm32::init(Default::default());
-    warn!("TRACE {}", Config::default().enable_debug_during_sleep);
 
     // create some GPIO on input mode and read from them
     let pin0 = Input::new(p.PC10, Pull::None);
@@ -127,7 +126,7 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(readers::imu_reader(i2c_bus, CAN_CHANNEL.sender()).unwrap());
 
     // this pretty much straight from docs, adc dma is very new in embassy stm32 hal
-    const ADC_BUF_SIZE: usize = 1024;
+    const ADC_BUF_SIZE: usize = 3;
     let adc1 = Adc::new(p.ADC1);
     let adc_data = singleton!(ADCDAT : [u16; ADC_BUF_SIZE] = [0u16; ADC_BUF_SIZE])
         .expect("Could not init adc buffer");
