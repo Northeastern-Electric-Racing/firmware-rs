@@ -5,6 +5,8 @@ use adbms6830::client::Adbms6830;
 use adbms6830::client::RX_SIZE;
 use adbms6830::client::SpiPollAdc;
 use adbms6830::client::TX_SIZE;
+use adbms6830::registers::AdbmsCommand;
+use adbms6830::types::Adax;
 use adbms6830::types::ConfigA;
 use cortex_m::peripheral::SCB;
 use cortex_m_rt::{ExceptionFrame, exception};
@@ -59,7 +61,7 @@ async fn main(_spawner: Spawner) -> ! {
         &mut rx_buffer,
     );
 
-    match client.write::<ConfigA>(&[ConfigA::default()]).await {
+    match client.write(&[ConfigA::default()]).await {
         Ok(_) => (),
         Err(e) => match e {
             adbms6830::client::AdbmsError::CommunicationError(_) => todo!(),
@@ -71,8 +73,17 @@ async fn main(_spawner: Spawner) -> ! {
     }
 
     let res = client.read::<ConfigA>().await.unwrap();
-    let a = (res.first().unwrap());
+    let a = res.first().unwrap();
     a.comm_bk();
+
+    client
+        .command(Adax {
+            ow: false,
+            pup: false,
+            ch: adbms6830::types::AdaxChannels::All,
+        })
+        .await
+        .unwrap();
 
     let mut watchdog = IndependentWatchdog::new(p.IWDG, 1000000);
     watchdog.unleash();

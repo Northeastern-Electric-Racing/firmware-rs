@@ -1,5 +1,5 @@
 # The channel key should match the stable rust-toolchain.toml in the embassy repo
 [toolchain]
 channel = "nightly-2025-12-11"
-components = [ "rust-src", "rustfmt", "llvm-tools", "clippy", "miri" ]
+components = [ "rust-src", "rustfmt", "llvm-tools", "clippy", "miri","rust-analyzer" ]
 targets = [ "thumbv7em-none-eabi", "thumbv8m.main-none-eabihf" ]

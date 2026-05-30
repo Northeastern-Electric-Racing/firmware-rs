@@ -31,6 +31,13 @@ pub trait AdbmsReadableRegister: From<u64> {
     const READ_CMD: [u8; 2];
 }
 
+/// A command that does not have an additional payload or reception
+///
+/// May carry data in the command data stream
+pub trait AdbmsCommand {
+    fn get_command(&self) -> u16;
+}
+
 impl<'a, T: SpiBus, C: OutputPin, D: DelayNs, P, const N: usize, const NR: usize, const NT: usize>
     Adbms6830<'a, T, C, D, P, N, NR, NT>
 {
@@ -65,5 +72,16 @@ impl<'a, T: SpiBus, C: OutputPin, D: DelayNs, P, const N: usize, const NR: usize
             buf[..6].copy_from_slice(&raw[off..off + 6]);
             R::from(u64::from_le_bytes(buf))
         }))
+    }
+
+    /// Send a command
+    ///
+    /// Result index 0 is the IC closest to the controller.
+    pub async fn command<R: AdbmsCommand>(
+        &mut self,
+        cmd: R,
+    ) -> Result<(), AdbmsError<T::Error, C::Error>> {
+        self.send_command::<false>(cmd.get_command().to_le_bytes())
+            .await
     }
 }

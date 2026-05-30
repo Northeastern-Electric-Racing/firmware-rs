@@ -156,7 +156,7 @@ impl<'a, T: SpiBus, C: OutputPin, D: DelayNs, P, const N: usize, const NR: usize
 
     /// Send a isoSPI command
     /// B - if true, do not release CS (useful for eventual ADC poll).  Will still flush
-    async fn send_command<const B: bool>(
+    pub(crate) async fn send_command<const B: bool>(
         &mut self,
         cmd: [u8; 2],
     ) -> Result<(), AdbmsError<T::Error, C::Error>> {
