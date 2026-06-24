@@ -2,7 +2,7 @@ cargo-features = ["per-package-target"]
 
 [package]
 edition = "2024"
-name = "lightning"
+name = "shepherd-3"
 version = "0.1.0"
 forced-target = "thumbv8m.main-none-eabihf"
 
@@ -19,5 +19,6 @@ embassy-time.workspace = true
 embassy-futures.workspace = true
 heapless.workspace = true
 panic-probe.workspace = true
-embedded-can.workspace = true
 #static_cell.workspace = true
+
+adbms6830 = { version = "0.1.0", path = "../../crates/drivers/adbms6830" }

@@ -1,0 +1,9 @@
+[package]
+name = "adbms6830"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+embedded-hal-async.workspace = true
+embedded-hal.workspace = true
+bitfield-struct.workspace = true

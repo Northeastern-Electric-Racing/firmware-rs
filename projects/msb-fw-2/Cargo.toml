@@ -2,7 +2,7 @@ cargo-features = ["per-package-target"]
 
 [package]
 edition = "2024"
-name = "lightning"
+name = "msb-fw-2"
 version = "0.1.0"
 forced-target = "thumbv8m.main-none-eabihf"
 
@@ -19,5 +19,7 @@ embassy-time.workspace = true
 embassy-futures.workspace = true
 heapless.workspace = true
 panic-probe.workspace = true
-embedded-can.workspace = true
-#static_cell.workspace = true
+static_cell.workspace = true
+
+embassy-net.workspace = true
+rust-mqtt.workspace = true
