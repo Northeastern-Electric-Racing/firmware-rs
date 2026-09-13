@@ -16,7 +16,11 @@
 
 #![no_std]
 
+#[rustfmt::skip]
 pub mod chip;
+#[rustfmt::skip]
 pub mod turnkey;
+#[rustfmt::skip]
 pub mod line;
+#[rustfmt::skip]
 mod docs;

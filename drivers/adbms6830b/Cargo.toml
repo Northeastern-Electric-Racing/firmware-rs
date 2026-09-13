@@ -18,3 +18,6 @@ embassy-time.workspace = true
 embedded-hal-bus.workspace = true
 
 adbms6830b-macros = { path = "adbms6830b_macros" }
+
+[lints]
+workspace = true

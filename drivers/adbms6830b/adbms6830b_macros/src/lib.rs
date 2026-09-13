@@ -5,7 +5,7 @@ use proc_macro2::{Literal, TokenStream as TokenStream2};
 use quote::quote;
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
-use syn::{parse_macro_input, Data, DeriveInput, Expr, Fields, MetaNameValue, Token};
+use syn::{Data, DeriveInput, Expr, Fields, MetaNameValue, Token, parse_macro_input};
 
 /// Derives an associated `const DEFAULT: Self` for an enum, set to the variant
 /// marked with `#[default]`. This exists because the standard `Default` trait isn't
@@ -36,10 +36,12 @@ pub fn bitfield_enum_default(item: TokenStream) -> TokenStream {
         .into();
     };
 
-    let mut default_variants = data
-        .variants
-        .iter()
-        .filter(|variant| variant.attrs.iter().any(|attr| attr.path().is_ident("default")));
+    let mut default_variants = data.variants.iter().filter(|variant| {
+        variant
+            .attrs
+            .iter()
+            .any(|attr| attr.path().is_ident("default"))
+    });
 
     let Some(default_variant) = default_variants.next() else {
         return syn::Error::new_spanned(
@@ -212,7 +214,11 @@ fn register_group_impl(
     let mut read_arg: Option<&Expr> = None;
     for arg in args {
         if arg.path.is_ident("bytes") {
-            let syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Int(int), .. }) = &arg.value else {
+            let syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Int(int),
+                ..
+            }) = &arg.value
+            else {
                 return Err(syn::Error::new_spanned(
                     &arg.value,
                     "`bytes` must be an integer literal",
@@ -279,7 +285,9 @@ fn register_group_impl(
     // Byte offsets and lengths (computed via the declared `bytes` count).
     // Not using `size_of` here since that might include padding which would mess up the actual byte format
     let data_indices: Vec<Literal> = (0..n).map(Literal::usize_unsuffixed).collect();
-    let pad_zeros: Vec<Literal> = (0..(backing_size - n)).map(|_| Literal::u8_unsuffixed(0)).collect();
+    let pad_zeros: Vec<Literal> = (0..(backing_size - n))
+        .map(|_| Literal::u8_unsuffixed(0))
+        .collect();
     let group_len = Literal::usize_unsuffixed(n);
 
     // The group serializes as the low `bytes` bytes of its bitfield backing value.
@@ -396,22 +404,22 @@ fn backing_of_bitfield(
         if let syn::Meta::List(list) = &attr.meta
             && let Some(proc_macro2::TokenTree::Ident(ident)) =
                 list.tokens.clone().into_iter().next()
-            {
-                let size = match ident.to_string().as_str() {
-                    "u8" => 1,
-                    "u16" => 2,
-                    "u32" => 4,
-                    "u64" => 8,
-                    "u128" => 16,
-                    _ => {
-                        return Err(syn::Error::new_spanned(
-                            &ident,
-                            "unsupported `#[bitfield]` backing type (expected u8, u16, u32, u64, or u128)",
-                        ));
-                    }
-                };
-                return Ok((ident, size));
-            }
+        {
+            let size = match ident.to_string().as_str() {
+                "u8" => 1,
+                "u16" => 2,
+                "u32" => 4,
+                "u64" => 8,
+                "u128" => 16,
+                _ => {
+                    return Err(syn::Error::new_spanned(
+                        &ident,
+                        "unsupported `#[bitfield]` backing type (expected u8, u16, u32, u64, or u128)",
+                    ));
+                }
+            };
+            return Ok((ident, size));
+        }
     }
     Err(syn::Error::new_spanned(
         span_src,
@@ -431,9 +439,9 @@ fn extract_doc(attrs: &[syn::Attribute]) -> String {
                 lit: syn::Lit::Str(text),
                 ..
             }) = &name_value.value
-            {
-                parts.push(text.value().trim().to_string());
-            }
+        {
+            parts.push(text.value().trim().to_string());
+        }
     }
     parts.join(" ")
 }
@@ -640,4 +648,3 @@ fn register_group_aggregate_impl(
         #group_impl
     })
 }
-

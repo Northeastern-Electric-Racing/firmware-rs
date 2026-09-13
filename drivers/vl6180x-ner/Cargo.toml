@@ -8,3 +8,6 @@ embedded-hal-async.workspace = true
 embedded-hal.workspace = true
 int-enum = {version = "1.1.2", default-features = false}
 #int-enum-impl = "0.5.0"
+
+[lints]
+workspace = true
