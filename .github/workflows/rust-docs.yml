@@ -1,0 +1,48 @@
+name: Rust Docs Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - develop
+      - docs-online
+  workflow_dispatch:
+
+# Set permissions for GITHUB_TOKEN to allow GitHub Pages deployments
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Run Rust Doc
+        run: cargo doc --no-deps --workspace
+
+      - name: Patch Rust Doc index
+        run: echo '<meta http-equiv="refresh" content="0; URL=./can_handler/index.html">' > target/thumbv8m.main-none-eabihf/doc/index.html
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './target/thumbv8m.main-none-eabihf/doc/' # Folder containing the files to host
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
