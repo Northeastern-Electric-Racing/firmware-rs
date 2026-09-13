@@ -393,8 +393,8 @@ fn backing_of_bitfield(
         if !attr.path().is_ident("bitfield") {
             continue;
         }
-        if let syn::Meta::List(list) = &attr.meta {
-            if let Some(proc_macro2::TokenTree::Ident(ident)) =
+        if let syn::Meta::List(list) = &attr.meta
+            && let Some(proc_macro2::TokenTree::Ident(ident)) =
                 list.tokens.clone().into_iter().next()
             {
                 let size = match ident.to_string().as_str() {
@@ -412,7 +412,6 @@ fn backing_of_bitfield(
                 };
                 return Ok((ident, size));
             }
-        }
     }
     Err(syn::Error::new_spanned(
         span_src,
@@ -427,15 +426,14 @@ fn extract_doc(attrs: &[syn::Attribute]) -> String {
         if !attr.path().is_ident("doc") {
             continue;
         }
-        if let syn::Meta::NameValue(name_value) = &attr.meta {
-            if let syn::Expr::Lit(syn::ExprLit {
+        if let syn::Meta::NameValue(name_value) = &attr.meta
+            && let syn::Expr::Lit(syn::ExprLit {
                 lit: syn::Lit::Str(text),
                 ..
             }) = &name_value.value
             {
                 parts.push(text.value().trim().to_string());
             }
-        }
     }
     parts.join(" ")
 }
