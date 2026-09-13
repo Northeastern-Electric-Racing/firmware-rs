@@ -28,6 +28,9 @@ jobs:
       - name: Run Rust Doc
         run: cargo doc --no-deps --workspace
 
+      - name: Patch Rust Doc index
+        run: echo '<meta http-equiv="refresh" content="0; URL=./can_handler/index.html">' > target/thumbv8m.main-none-eabihf/doc/index.html
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
