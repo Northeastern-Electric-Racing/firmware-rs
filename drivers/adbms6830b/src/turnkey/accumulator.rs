@@ -229,11 +229,10 @@ impl<const N: usize> Accumulator<N> {
         }
 
         // if the mask is expired, set it to NotMasked before doing anything
-        if let Some(until) = self.pec_mask.until() {
-            if Instant::now() >= until {
+        if let Some(until) = self.pec_mask.until()
+            && Instant::now() >= until {
                 self.pec_mask = PecMask::NotMasked;
             }
-        }
 
         for (chip, state) in chips.iter().enumerate() {
             let failed = state.pec_failed_count();
@@ -456,7 +455,7 @@ impl<const N: usize> Accumulator<N> {
                                 at,
                                 until: Instant::now() + Duration::from_millis(self.config.segment_isospi_eval_period_ms),
                                 total_attempts: total_attempts + 1,
-                                failed_attempts: failed_attempts // keep the same this undetermined doesnt count as failed
+                                failed_attempts // keep the same this undetermined doesnt count as failed
                             }
                         },
 
@@ -508,7 +507,7 @@ impl<const N: usize> Accumulator<N> {
             state: self.state,
             failed,
             attempts,
-            failure_pct: failure_pct,
+            failure_pct,
             failure_pct_threshold: self.config.segment_isospi_pec_failure_ratio_pct,
             accumulator_window_period: self.config.segment_isospi_eval_period_ms,
             min_attempts_for_fail: self.config.segment_isospi_min_attempts_for_fail,

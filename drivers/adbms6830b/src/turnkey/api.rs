@@ -308,48 +308,23 @@ impl<SPI: SpiDevice, const N: usize> Api<SPI, N> {
         };
 
         // make sure they're awake to recieve the srst command first
-        if let Err(err) = self.wakeup().await {
-            #[cfg(feature = "defmt")]
-            defmt::error!("ADBMS6830B: Api: in `.reset()`: Failed to call `self.wakeup()` while trying to reset chips. Error: {}", err.to_kind());
-            
-            return Err(err);
-        }
+        self.wakeup().await?;
 
         // issue SRST
-        if let Err(err) = self.command(commands::misc::srst()).await {
-            #[cfg(feature = "defmt")]
-            defmt::error!("ADBMS6830B: Api: in `.reset()`: Failed to issue SRST command while trying to reset chips. Error: {}", err.to_kind());
-            
-            return Err(err);
-        }
+        self.command(commands::misc::srst()).await?;
 
         // wake them up again since we just used SRST on them
-        if let Err(err) = self.wakeup().await {
-            #[cfg(feature = "defmt")]
-            defmt::error!("ADBMS6830B: Api: in `.reset()`: Failed to call `self.wakeup()` after issuing SRST. Error: {}", err.to_kind());
-            
-            return Err(err);
-        }
+        self.wakeup().await?;
 
         // clear all flags so we start from normal
         let clear = ClearFlags::clear_all();
         let clears = [clear; N];
-        if let Err(err) = self.write::<ClearFlags>(&clears).await {
-            #[cfg(feature = "defmt")]
-            defmt::error!("ADBMS6830B: Api: in `.reset()`: Failed to call `self.write()` while trying to modify ClearFlags. Error: {}", err.to_kind());
-            
-            return Err(err);
-        }
+        self.write::<ClearFlags>(&clears).await?;
 
         // also clear all the OV/UV flags
         let clear = ClearOvervoltageUndervoltage::clear_all();
         let clears = [clear; N];
-        if let Err(err) = self.write::<ClearOvervoltageUndervoltage>(&clears).await {
-            #[cfg(feature = "defmt")]
-            defmt::error!("ADBMS6830B: Api: in `.reset()`: Failed to call `self.write()` while trying to modify ClearOvervoltageUndervoltage. Error: {}", err.to_kind());
-            
-            return Err(err);
-        }
+        self.write::<ClearOvervoltageUndervoltage>(&clears).await?;
 
         let boundary: usize = self.split().into();
         let split_active = boundary > 0 && boundary < N;
@@ -358,12 +333,7 @@ impl<SPI: SpiDevice, const N: usize> Api<SPI, N> {
         // this returns what we should reset the command count to
         let expected_command_count: u8 = if split_active {
             // if a split is active we need to re-write configA with COMM_BK. set_configa() will write a blank config, but with the COMM_BK bit set as necessary
-            if let Err(err) = self.set_configa(&[ConfigA::new(); N]).await {
-                #[cfg(feature = "defmt")]
-                defmt::error!("ADBMS6830B: Api: in `.reset()`: Failed to call `self.write()` while trying to write ConfigA to re-instate COMM_BK. Error: {}", err.to_kind());
-                
-                return Err(err);
-            }
+            self.set_configa(&[ConfigA::new(); N]).await?;
 
             // ClearFlags + ClearOvervoltageUndervoltage + ConfigA
             3
@@ -605,7 +575,7 @@ impl<SPI: SpiDevice, const N: usize> Api<SPI, N> {
     /// Sets ConfigB.
     pub async fn set_configb(&mut self, configs: &[ConfigB; N]) -> Result<(), Error<SPI::Error>> {
         // this function does nothing special right now. but probably keep it here in case we need to cache configb in the future
-        self.private_write(&configs).await
+        self.private_write(configs).await
     }
     
     /// Writes one register group per chip. `groups` is indexed in logical chip order.

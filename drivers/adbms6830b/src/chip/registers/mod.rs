@@ -334,7 +334,7 @@ pub(in crate::chip) mod table107 {
                 /// to `VPV_MAX_MICROVOLTS` range.
                 pub const fn from_microvolts(microvolts: i32) -> Option<Self> {
                     match $crate::chip::registers::table107::VpvInner::from_microvolts(microvolts) {
-                        Some(inner) => Some(Self { inner: inner }),
+                        Some(inner) => Some(Self { inner }),
                         None => None,
                     }
                 }
@@ -481,7 +481,7 @@ pub(in crate::chip) mod table107 {
                 /// ![image](https://upload.wikimedia.org/wikipedia/commons/8/81/Headshot_of_Anders_Celsius.jpg)
                 pub const fn from_microcelsius(microcelsius: i32) -> Option<Self> {
                     match $crate::chip::registers::table107::ItmpInner::from_microcelsius(microcelsius) {
-                        Some(inner) => Some(Self { inner: inner }),
+                        Some(inner) => Some(Self { inner }),
                         None => None,
                     }
                 }

@@ -337,7 +337,7 @@ impl<SPI: SpiDevice, const N: usize> Service<SPI, N> {
         self.cycles_count += 1;
         
         ServiceDiagnostics {
-            accumulator_diagnostics: accumulator_diagnostics,
+            accumulator_diagnostics,
             timing_diagnostics: TimingDiagnostics {
                 period, max_period: self.max_period, work, max_work: self.max_work,
             },
