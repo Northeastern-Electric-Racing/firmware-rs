@@ -32,7 +32,7 @@ jobs:
         run: echo '<meta http-equiv="refresh" content="0; URL=./can_handler/index.html">' > target/thumbv8m.main-none-eabihf/doc/index.html
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: './target/thumbv8m.main-none-eabihf/doc/' # Folder containing the files to host
 
