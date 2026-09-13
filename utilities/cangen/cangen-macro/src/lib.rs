@@ -7,7 +7,10 @@ use syn::Ident;
 
 extern crate proc_macro;
 
-const CANGEN_SPEC_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/Odyssey-Definitions/can-messages/");
+const CANGEN_SPEC_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/Odyssey-Definitions/can-messages/"
+);
 
 #[proc_macro]
 pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
