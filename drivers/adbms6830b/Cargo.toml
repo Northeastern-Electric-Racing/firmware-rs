@@ -1,0 +1,23 @@
+[package]
+name = "adbms6830b"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+# Feature that implements `defmt::Format` for the public types this driver provides in its API.
+defmt = ["dep:defmt", "embassy-time/defmt", "embedded-hal-async/defmt-03"]
+
+[dependencies]
+embedded-hal-async.workspace = true
+bitfield-struct.workspace = true
+device-driver.workspace = true
+arbitrary-int.workspace = true
+defmt = { workspace = true, optional = true }
+embassy-time.workspace = true
+embedded-hal-bus.workspace = true
+
+adbms6830b-macros = { path = "adbms6830b_macros" }
+
+[lints]
+workspace = true

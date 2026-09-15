@@ -21,6 +21,10 @@ jobs:
           submodules: recursive
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          # make CI adhere to the Cargo.toml lint config
+          rustflags: ""
+          build-warnings: warn
       - name: Build
         run: cargo build --verbose --workspace --all --all-features
       #  - name: Test

@@ -14,3 +14,6 @@ defmt.workspace = true
 embedded-can.workspace = true
 heapless = "0.9.3"
 
+
+[lints]
+workspace = true

@@ -1,5 +1,5 @@
 [workspace]
-members = ["drivers/*", "platform/*", "utilities/*"]
+members = ["drivers/*", "drivers/adbms6830b/adbms6830b_macros", "platform/*", "utilities/*"]
 resolver = "3"
 
 # for some reason cargo is too dumb to build a macro for host
@@ -14,3 +14,17 @@ embedded-io-async = { version = "0.7", features = ["defmt"] }
 embedded-hal-async = { version = "1" }
 embedded-can = "0.4.1"
 bitfield-struct = "0.13"
+embassy-time = { version = "0.5.1", features = ["defmt"] }
+
+device-driver = { version = "1.0.9" }
+arbitrary-int = { version = "2.1.1" }
+embassy-executor = { version = "0.10.0" }
+embassy-sync = { version = "0.8.0" }
+
+[workspace.lints.clippy]
+all = { level = "allow", priority = -2 }
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+perf = { level = "deny", priority = -1 }
+disallowed_types = "deny"
+default_numeric_fallback = "warn"

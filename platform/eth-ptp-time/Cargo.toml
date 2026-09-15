@@ -8,3 +8,6 @@ edition = "2024"
 embassy-stm32 = { version = "0.6.0", features = ["stm32h563zi", "unstable-pac"] }
 
 
+
+[lints]
+workspace = true

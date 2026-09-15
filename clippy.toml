@@ -1,0 +1,4 @@
+# Enforced via `disallowed_types = "deny"` in the workspace lints, see Cargo.toml.
+disallowed-types = [
+    { path = "f64", reason = "Use f32 or fixed-point arithmetic instead." },
+]
