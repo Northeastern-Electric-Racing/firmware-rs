@@ -491,6 +491,35 @@ pub mod adc {
         RoundRobinCh5ToCh7 = 15,
     }
 
+    impl VoltageChannel {
+        /// How many conversions this selection performs, one after another.
+        ///
+        /// A single-channel selection is one conversion; a round robin is one per channel in its
+        /// range. `SingleV7AndV9` and `SingleV8AndV10` still count as one, because those pairs
+        /// convert concurrently on the two different ADCs rather than in sequence.
+        ///
+        /// Useful for sizing how long to wait before polling -- see `Line::adv_autoconvert`.
+        pub const fn channel_count(self) -> u8 {
+            match self {
+                Self::SingleV1
+                | Self::SingleV2
+                | Self::SingleV3
+                | Self::SingleV4
+                | Self::SingleV5
+                | Self::SingleV6
+                | Self::SingleV7AndV9
+                | Self::SingleV8AndV10
+                | Self::SingleVref2 => 1,
+                Self::RoundRobinCh1Ch3Ch5
+                | Self::RoundRobinCh0Ch2Ch4
+                | Self::RoundRobinCh5ToCh7 => 3,
+                Self::RoundRobinCh0ToCh3 | Self::RoundRobinCh4ToCh7 => 4,
+                Self::RoundRobinCh0ToCh5 => 6,
+                Self::RoundRobinCh0ToCh8 => 9,
+            }
+        }
+    }
+
     /// Start I1ADC (and VB1ADC) Conversion
     ///
     /// The VB1ADC converts alongside I1ADC and latches the `VB1MUX` bit from CFGA when this

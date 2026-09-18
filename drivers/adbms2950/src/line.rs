@@ -31,7 +31,11 @@
 
 use embedded_hal_async::spi::{Operation, SpiDevice};
 
-use crate::chip::commands::CommandFrame;
+use crate::chip::commands;
+use crate::chip::commands::{
+    CommandFrame,
+    adc::{Acquisition, Diagnostic, OpenWire, OpenWireVoltage, Redundancy, VoltageChannel},
+};
 use crate::chip::pec::{DataPecRx, DataPecTx};
 use crate::chip::registers::{GROUP_BYTES, ReadableGroup, WritableGroup};
 
@@ -305,6 +309,93 @@ impl<SPI: SpiDevice> Line<SPI> {
             return Err(Error::WrongDevice(response.data.device_id()));
         }
         Ok(response.data)
+    }
+
+    /// Starts an I1ADC conversion and waits for it to finish.
+    ///
+    /// Always a single-shot conversion: a continuous one never reports completion, so there
+    /// would be nothing to poll. To run continuously, send
+    /// [`crate::chip::commands::adc::adi1`] yourself with [`Acquisition::Continuous`] and track
+    /// progress through the FLAG register's `i1pha`/`i1cnt` counters instead.
+    ///
+    /// The settle wait is `tIxADC_STARTUP`, which is what the *first* conversion after power-up
+    /// or `SRST` costs. Subsequent conversions finish in about
+    /// [`conversion_times::IXADC_CONVERSION_MS`], so polling simply returns on the first try.
+    pub async fn adi1_autoconvert(
+        &mut self,
+        rd: Redundancy,
+        diag: Diagnostic,
+        ow: OpenWire,
+        timeout: embassy_time::Duration,
+    ) -> Result<(), Error<SPI::Error>> {
+        let start = commands::adc::adi1(rd, Acquisition::SingleShot, diag, ow).frame();
+        self.command(start).await?;
+        self.poll_until(
+            commands::poll::pli1().frame(),
+            embassy_time::Duration::from_millis(conversion_times::IXADC_STARTUP_MAX_MS as u64),
+            timeout,
+        )
+        .await
+    }
+
+    /// Starts an I2ADC conversion and waits for it to finish.
+    ///
+    /// Single-shot only, for the same reason as [`Line::adi1_autoconvert`]. The second current
+    /// channel is independent of the first, so this has no redundancy parameter.
+    pub async fn adi2_autoconvert(
+        &mut self,
+        diag: Diagnostic,
+        ow: OpenWire,
+        timeout: embassy_time::Duration,
+    ) -> Result<(), Error<SPI::Error>> {
+        let start = commands::adc::adi2(Acquisition::SingleShot, diag, ow).frame();
+        self.command(start).await?;
+        self.poll_until(
+            commands::poll::pli2().frame(),
+            embassy_time::Duration::from_millis(conversion_times::IXADC_STARTUP_MAX_MS as u64),
+            timeout,
+        )
+        .await
+    }
+
+    /// Starts a V1ADC/V2ADC conversion and waits for it to finish.
+    ///
+    /// The settle wait scales with how many channels `vch` sweeps, since a round robin converts
+    /// them one after another. **Any `SOAK` time configured in CFGA is added by the chip on top
+    /// of this** and is not accounted for here -- if you enable soak, widen `timeout` to match.
+    pub async fn adv_autoconvert(
+        &mut self,
+        ow: OpenWireVoltage,
+        vch: VoltageChannel,
+        timeout: embassy_time::Duration,
+    ) -> Result<(), Error<SPI::Error>> {
+        let start = commands::adc::adv(ow, vch).frame();
+        let settle_us =
+            conversion_times::VADC_CONVERSION_MAX_US as u64 * vch.channel_count() as u64;
+        self.command(start).await?;
+        self.poll_until(
+            commands::poll::plv().frame(),
+            embassy_time::Duration::from_micros(settle_us),
+            timeout,
+        )
+        .await
+    }
+
+    /// Starts an AUX ADC conversion and waits for it to finish.
+    ///
+    /// The AUX ADC sweeps its whole set of internal rails and both temperature sensors, so
+    /// unlike [`Line::adv_autoconvert`] there is nothing to select.
+    pub async fn adx_autoconvert(
+        &mut self,
+        timeout: embassy_time::Duration,
+    ) -> Result<(), Error<SPI::Error>> {
+        self.command(commands::adc::adx().frame()).await?;
+        self.poll_until(
+            commands::poll::plx().frame(),
+            embassy_time::Duration::from_micros(conversion_times::VADC_CONVERSION_MAX_US as u64),
+            timeout,
+        )
+        .await
     }
 }
 
