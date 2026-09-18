@@ -1,7 +1,7 @@
-# Crate for helper proc macros inside ADBMS6830B driver.
+# Crate for helper proc macros shared by the ADBMS-family drivers.
 
 [package]
-name = "adbms6830b-macros"
+name = "adbms-register-macros"
 edition = "2024"
 publish = false
 [lib]
