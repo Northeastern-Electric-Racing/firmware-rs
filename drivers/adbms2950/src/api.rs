@@ -338,6 +338,26 @@ impl<SPI: SpiDevice> Api<SPI> {
         Ok(())
     }
 
+    /// Changes `ConfigA` without reading it back first.
+    ///
+    /// Applies `f` to the cached configuration and writes the result. This is how to drive a GPO
+    /// or GPIO -- for example an external relay wired to GPO4:
+    ///
+    /// ```ignore
+    /// api.modify_configa(|cfg| cfg.with_gpo4c(GpoOutputState::Driven)).await?;
+    /// ```
+    ///
+    /// The driver deliberately has no notion of what any GPO is wired to; that belongs to the
+    /// board. Note the cache is only as good as the device's compliance with the last write --
+    /// if [`DeviceState::suspected_reset`] goes true, the device is back at its reset defaults
+    /// and the cache is stale, so re-run your startup configuration.
+    pub async fn modify_configa(
+        &mut self,
+        f: impl FnOnce(ConfigA) -> ConfigA,
+    ) -> Result<(), Error<SPI::Error>> {
+        self.set_configa(f(self.config_a)).await
+    }
+
     /// Changes `ConfigB` without reading it back first. The `ConfigB` counterpart of
     /// [`Api::modify_configa`].
     pub async fn modify_configb(
@@ -367,26 +387,6 @@ impl<SPI: SpiDevice> Api<SPI> {
             OverCurrentChannel::Oc3 => self.config_b.oc3gc(),
         };
         code.as_microvolts(gain)
-    }
-
-    /// Changes `ConfigA` without reading it back first.
-    ///
-    /// Applies `f` to the cached configuration and writes the result. This is how to drive a GPO
-    /// or GPIO -- for example an external relay wired to GPO4:
-    ///
-    /// ```ignore
-    /// api.modify_configa(|cfg| cfg.with_gpo4c(GpoOutputState::Driven)).await?;
-    /// ```
-    ///
-    /// The driver deliberately has no notion of what any GPO is wired to; that belongs to the
-    /// board. Note the cache is only as good as the device's compliance with the last write --
-    /// if [`DeviceState::suspected_reset`] goes true, the device is back at its reset defaults
-    /// and the cache is stale, so re-run your startup configuration.
-    pub async fn modify_configa(
-        &mut self,
-        f: impl FnOnce(ConfigA) -> ConfigA,
-    ) -> Result<(), Error<SPI::Error>> {
-        self.set_configa(f(self.config_a)).await
     }
 
     /// Software-resets the device and waits out the regulator startup.
