@@ -14,31 +14,31 @@ mod sealed {
 
 pub trait CanRepr: sealed::Sealed + Copy {
     type Bytes: AsRef<[u8]>;
-    fn to_le_bytes(self) -> Self::Bytes;
+    fn to_be_bytes(self) -> Self::Bytes;
 }
 
 impl CanRepr for u8 {
     type Bytes = [u8; 1];
-    fn to_le_bytes(self) -> Self::Bytes {
-        u8::to_le_bytes(self)
+    fn to_be_bytes(self) -> Self::Bytes {
+        u8::to_be_bytes(self)
     }
 }
 impl CanRepr for u16 {
     type Bytes = [u8; 2];
-    fn to_le_bytes(self) -> Self::Bytes {
-        u16::to_le_bytes(self)
+    fn to_be_bytes(self) -> Self::Bytes {
+        u16::to_be_bytes(self)
     }
 }
 impl CanRepr for u32 {
     type Bytes = [u8; 4];
-    fn to_le_bytes(self) -> Self::Bytes {
-        u32::to_le_bytes(self)
+    fn to_be_bytes(self) -> Self::Bytes {
+        u32::to_be_bytes(self)
     }
 }
 impl CanRepr for u64 {
     type Bytes = [u8; 8];
-    fn to_le_bytes(self) -> Self::Bytes {
-        u64::to_le_bytes(self)
+    fn to_be_bytes(self) -> Self::Bytes {
+        u64::to_be_bytes(self)
     }
 }
 
@@ -65,7 +65,7 @@ pub trait ToCanFrame: Sized + Into<Self::Repr> {
     );
 
     fn to_can_frame<F: Frame>(self) -> F {
-        let bytes = self.into().to_le_bytes();
+        let bytes = self.into().to_be_bytes();
         // this is guarranteed in bounds by the `CHECK_BITS_FIT`
         // SAFETY: this is guarranteed to be within the size of a CAN frame by `CHECK_LEN`
         unsafe { F::new(Self::ID, &bytes.as_ref()[..Self::LEN]).unwrap_unchecked() }
