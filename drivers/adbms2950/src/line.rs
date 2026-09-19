@@ -230,7 +230,7 @@ impl<SPI: SpiDevice> Line<SPI> {
 
     /// Sends a wake-up pulse and waits out the regulator startup time.
     ///
-    /// Only needed after power-up or an `SRST`. Unlike the ADBMS6830B, this chip has no isoSPI
+    /// Only needed after power-up or an `SRST`. This chip has no isoSPI
     /// idle timeout and no sleep state, so there is no reason to call this before an ordinary
     /// transaction.
     ///
@@ -291,9 +291,7 @@ impl<SPI: SpiDevice> Line<SPI> {
 
     /// Confirms the attached device is an ADBMS2950B, returning its serial ID.
     ///
-    /// Reads `RDSID` and checks the `DEVID` bits. Useful both as a presence check and to catch a
-    /// miswired bus where an ADBMS6830B answered instead -- the two chips share this command's
-    /// opcode but report different device IDs.
+    /// Reads `RDSID` and checks the `DEVID` bits. Useful as a presence check
     pub async fn detect(
         &mut self,
     ) -> Result<crate::chip::registers::serial_id::SerialId, Error<SPI::Error>> {

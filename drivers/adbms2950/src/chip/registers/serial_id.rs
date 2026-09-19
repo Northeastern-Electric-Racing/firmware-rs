@@ -16,8 +16,7 @@ use super::register_group;
 
 /// Device derivative identifier (`DEVID`) for the ADBMS2950B.
 ///
-/// See `DEVID` in Table 77 on page 62 of the datasheet. Note this differs from the ADBMS6830B's
-/// `0b00_0011`, so it is a reliable way to tell the two apart on a shared isoSPI bus.
+/// See `DEVID` in Table 77 on page 62 of the datasheet.
 pub const ADBMS2950B_DEVICE_ID: u8 = 0b00_0110;
 
 /// Serial ID Register Group.

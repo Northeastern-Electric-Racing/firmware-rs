@@ -23,12 +23,6 @@ pub struct CommandCode {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Command {
     /// Whether or not the command counter increments for the command.
-    ///
-    /// Unlike the ADBMS6830B datasheet, Table 33 has no INC column. The rule is stated in prose in
-    /// the "Command Counter" section on page 24 instead: the counter increments when the device
-    /// receives "a command without data, which are the 4-byte commands like SNAP, UNSNAP, and
-    /// ADI1, or ... a command with write data like WRCFGA and CLRFLAG". So reads don't increment,
-    /// and neither do RSTCC and SRST, which reset the counter to 0 instead.
     inc: bool,
     /// The 11-bit CC[10:0] field for the command.
     code: CommandCode,
@@ -254,40 +248,6 @@ pub mod status {
     pub const fn rdflagerr() -> Command { Command::define(false, 0b00001110010) }
 }
 
-/// ADBMS6830B-compatibility command codes that have no effect on this chip.
-///
-/// Table 87 on page 71 of the datasheet lists command codes the ADBMS2950B accepts purely so that
-/// host software written for the ADBMS6830B keeps working on a mixed bus. Quoting the datasheet,
-/// these codes "do not have an internal effect on ADBMS2950B other than behaving as a read
-/// command returning do not care data with a valid DPEC or behaving as a write command with the
-/// data written being do not care and incrementing the command counter if the DPEC is valid."
-///
-/// In other words: they are well-formed no-ops. They *do* still bump the command counter, so a
-/// host tracking `CCNT` has to account for them.
-///
-/// **There is no PWM register on the ADBMS2950B.** The `WRPWM`/`RDPWM` codes below exist only for
-/// ADBMS6830B compatibility. What this chip calls PWM is unrelated: it is the duty cycle the chip
-/// *drives* on the OCA and OCB pins to report overcurrent status, selected with `OCMODE` in CFGB
-/// and decoded by an external timer or capture-compare unit. See Table 60 and Table 61 on pages
-/// 47 and 48 of the datasheet.
-///
-/// Only the four PWM codes are exposed here, since they are the ones most likely to be reached
-/// for by mistake. The rest of Table 87 (`CLOVUV`, `WRAO`, `RDAO`, the `CM*` cell-monitor codes,
-/// `RDACF`, `RDSVE`) is deliberately left out.
-#[rustfmt::skip]
-pub mod compatibility {
-    use super::Command;
-
-    /// ADBMS6830B `WRPWMA`. No effect on the ADBMS2950B; the written data is ignored.
-    pub const fn wrpwma() -> Command { Command::define(true, 0b00000100000) }
-    /// ADBMS6830B `RDPWMA`. No effect on the ADBMS2950B; returns do-not-care data.
-    pub const fn rdpwma() -> Command { Command::define(false, 0b00000100010) }
-    /// ADBMS6830B `WRPWMB`. No effect on the ADBMS2950B; the written data is ignored.
-    pub const fn wrpwmb() -> Command { Command::define(true, 0b00000100001) }
-    /// ADBMS6830B `RDPWMB`. No effect on the ADBMS2950B; returns do-not-care data.
-    pub const fn rdpwmb() -> Command { Command::define(false, 0b00000100011) }
-}
-
 /// Clear commands.
 #[rustfmt::skip]
 pub mod clear {
@@ -369,10 +329,7 @@ pub mod adc {
     use super::Command;
     use bitfield_struct::bitfield;
 
-    /// Redundancy (RD) for the ADI1 command. One-bit field.
-    ///
-    /// Unlike the ADBMS6830B's C-ADC/S-ADC pair, the ADBMS2950B's second current channel is an
-    /// independent path rather than a redundant ADC, so `ADI2` has no RD bit at all.
+    /// Redundancy (RD) for the ADI1 command.
     #[repr(u8)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     #[cfg_attr(feature = "defmt", derive(defmt::Format))]

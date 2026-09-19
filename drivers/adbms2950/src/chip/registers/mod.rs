@@ -199,9 +199,7 @@ pub mod measurement {
 
     /// AUX ADC temperature 1 result (`TMP1`), the die temperature. Signed 16-bit.
     ///
-    /// Per Table 51, `temperature in C = (TMP1 / 61.8) - 250`. Note this is a different formula
-    /// *and* a different divisor from `Temperature2`, and neither matches the offset-and-scale
-    /// form the ADBMS6830B uses for its internal temperature.
+    /// Per Table 51, `temperature in C = (TMP1 / 61.8) - 250`.
     #[bitfield(u16, defmt = cfg(feature = "defmt"))]
     #[derive(PartialEq, Eq)]
     pub struct Temperature1 {
