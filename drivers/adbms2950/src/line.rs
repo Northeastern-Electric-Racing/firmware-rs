@@ -4,30 +4,25 @@
 //! the data PEC, extracts the command counter, and waits out the datasheet's conversion times.
 //! Everything it sends and decodes is built from [`crate::chip`].
 //!
-//! ### Why this is much simpler than the ADBMS6830B's equivalent
+//! ### Most applications want [`crate::api`] instead
 //!
-//! The ADBMS6830B driver's `line` module carries a lot of machinery this one does not need:
+//! A `Line` is stateless. It will happily send a command and forget it happened, which means
+//! anything that has to be remembered *between* transactions is left to you: the command
+//! counter, PEC tallies, the cached configuration, which line is active. [`crate::api::Api`]
+//! keeps all of that, and reimplementing it per-application is how it ends up subtly wrong.
 //!
-//! - **No sleep detection.** The ADBMS6830B's core sleeps after roughly 1.5 s of quiet, so its
-//!   driver has to notice that and recover. The ADBMS2950B has no sleep state at all: the word
-//!   does not appear anywhere in its datasheet, and unlike the ADBMS6830B its status registers
-//!   carry no `SLEEP` bit for a host to poll. So there is no `last_activity` tracking, no sleep
-//!   threshold, and no startup-from-sleep path.
+//! You cannot hold both for the same device -- [`crate::api::Api::new`] takes its lines by
+//! value -- so this is a choice made once at construction, not a thing to get wrong later.
 //!
-//!   Note this driver still sends a wake-up pulse before **every** transaction, which is what the
-//!   vendor's reference code does. The pulse is cheap -- a chip-select toggle with a 2 us delay
-//!   either side, so about 4 us for one device -- and it is emphatically *not* the 500 us
-//!   `tWAKE` regulator startup, which is only owed after power-up or an `SRST`
-//!   (see [`Line::wait_after_reset`]). Paying 4 us unconditionally is a much better trade than
-//!   reasoning about whether the isoSPI port can time out while idle, which the datasheet does
-//!   not actually say.
-//! - **No daisy chain.** This driver targets one device measuring the tractive system as a whole,
-//!   so there is no device count, no per-device response array, and no reversing the write
-//!   payload to account for the first block landing in the furthest device. Adding chain support
-//!   later means making `read`/`write` loop over blocks; nothing else here would change.
-//! - **PEC failure is an error, not per-device data.** With one device a bad PEC means the read
-//!   is simply invalid, so it comes back as [`Error::Pec`] rather than a status flag you have to
-//!   remember to check.
+//! Reaching for `Line` directly is the right call when:
+//!
+//! - **You are bringing up hardware.** Sending one command and looking at the bytes is easier
+//!   without a layer maintaining invariants around it.
+//! - **You want a different policy than [`crate::api`] implements.** `Api` is itself just a
+//!   `Line` plus bookkeeping; if you need different failover or counter semantics, build your
+//!   own on this rather than fighting it.
+//! - **You are writing tests.** A `Line<MockSpi>` is much less to stand up than a full `Api`.
+//! - **You genuinely want no state.** A one-shot read at startup does not need a counter.
 
 use embedded_hal_async::spi::{Operation, SpiDevice};
 
