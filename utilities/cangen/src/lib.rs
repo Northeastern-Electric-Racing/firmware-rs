@@ -65,6 +65,13 @@ pub trait ToCanFrame: Sized + Into<Self::Repr> {
     );
 
     fn to_can_frame<F: Frame>(self) -> F {
+        // Default assoc consts are only evaluated when referenced, so these
+        // force the compile-time bounds check they exist for -- without this,
+        // an out-of-range `LEN`/`Repr` silently skips straight to a runtime
+        // panic on the slice below instead of failing the build.
+        let _: () = Self::CHECK_BITS_FIT;
+        let _: () = Self::CHECK_LEN;
+
         let bytes = self.into().to_be_bytes();
         // this is guarranteed in bounds by the `CHECK_BITS_FIT`
         // SAFETY: this is guarranteed to be within the size of a CAN frame by `CHECK_LEN`
