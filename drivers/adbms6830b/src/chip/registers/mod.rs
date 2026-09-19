@@ -7,7 +7,7 @@
 #![allow(dead_code)]
 #![allow(rustdoc::broken_intra_doc_links)]
 
-use adbms6830b_macros::{register_group, register_group_aggregate};
+use adbms_register_macros::{register_group, register_group_aggregate};
 
 use super::commands::CommandFrame;
 

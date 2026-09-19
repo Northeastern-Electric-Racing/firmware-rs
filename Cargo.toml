@@ -1,5 +1,5 @@
 [workspace]
-members = ["drivers/*", "drivers/adbms6830b/adbms6830b_macros", "platform/*", "utilities/*"]
+members = ["drivers/*", "platform/*", "utilities/*"]
 resolver = "3"
 
 # for some reason cargo is too dumb to build a macro for host
