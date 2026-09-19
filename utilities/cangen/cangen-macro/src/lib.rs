@@ -326,8 +326,16 @@ fn build_struct(msg: CANMsg) -> proc_macro2::TokenStream {
     let ts = uint_for(bit_cnt);
 
     // Generate the final output Rust code
+    //
+    // `order = Msb` is required here: CAN messages are big-endian and points
+    // are declared in wire order (first point = first byte(s)), but
+    // `bitfield_struct` defaults to `Lsb`, which packs the first-declared
+    // field into the *low* bits of the backing integer. `to_can_frame` then
+    // does a single word-level `to_be_bytes()`, which would transpose the
+    // fields (and misplace trailing padding) instead of preserving their
+    // declared order on the wire.
     let expanded = quote! {
-        #[bitfield(#ts)]
+        #[bitfield(#ts, order = Msb)]
         pub struct #struct_name {
             #(#field_declarations),*
         }
