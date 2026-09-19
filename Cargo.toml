@@ -14,3 +14,14 @@ embedded-io-async = { version = "0.7", features = ["defmt"] }
 embedded-hal-async = { version = "1" }
 embedded-can = "0.4.1"
 bitfield-struct = "0.13"
+static_cell = "2.1"
+
+# PLATFORM ONLY
+embassy-executor = { version = "0.10.0", features = ["executor-thread", "executor-interrupt", "platform-cortex-m"] }
+embassy-stm32 = { version = "0.6.0", features = ["stm32h563zi", "defmt", "unstable-pac"] }
+embassy-net = { version = "0.9.1", features = ["udp", "tcp", "medium-ethernet", "ipv4", "icmp-ping-reply", "defmt"] }
+
+[patch.crates-io]
+embassy-executor = { git = "https://github.com/embassy-rs/embassy", rev = "c0c0419f48c67e160ab0e3a8a93dcaaa2d4e84fb" }
+embassy-stm32 = { git = "https://github.com/embassy-rs/embassy", rev = "c0c0419f48c67e160ab0e3a8a93dcaaa2d4e84fb" }
+embassy-net = { git = "https://github.com/embassy-rs/embassy", rev = "c0c0419f48c67e160ab0e3a8a93dcaaa2d4e84fb" }

@@ -4,9 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-# right now this requires this exact version stm as it is register based
-embassy-executor = { version = "0.10.0", features = ["executor-thread", "executor-interrupt", "platform-cortex-m"] }
-embassy-stm32 = { version = "0.6.0", features = ["stm32h563zi", "defmt"] }
+
 embassy-futures = "0.1.2"
 embassy-sync = "0.8.0"
 
@@ -14,3 +12,5 @@ defmt.workspace = true
 embedded-can.workspace = true
 heapless = "0.9.3"
 
+embassy-stm32.workspace = true
+embassy-executor.workspace = true

@@ -5,6 +5,4 @@ edition = "2024"
 
 [dependencies]
 # right now this requires this exact version stm as it is register based
-embassy-stm32 = { version = "0.6.0", features = ["stm32h563zi", "unstable-pac"] }
-
-
+embassy-stm32.workspace = true
