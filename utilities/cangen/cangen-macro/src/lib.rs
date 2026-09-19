@@ -138,9 +138,14 @@ fn doc_attrs(nf: Option<&NetField>) -> proc_macro2::TokenStream {
 /// Returns `(field_declaration, checked_accessor_methods)`; the second is empty
 /// for non-scaled points.
 fn field_tokens(
+    struct_name: &Ident,
     i: usize,
     f: &definition_rs::CANPoint,
-) -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
+) -> (
+    proc_macro2::TokenStream, // field declaration (struct-scoped)
+    proc_macro2::TokenStream, // checked accessor methods (impl-scoped)
+    proc_macro2::TokenStream, // byte-swap helper fns (module-scoped)
+) {
     let bits = proc_macro2::Literal::usize_unsuffixed(f.size);
     let signed = f.signed.unwrap_or(false);
 
@@ -151,7 +156,7 @@ fn field_tokens(
         // name all reserved bits as such
         let ident = Ident::new(&format!("_reserved{i}"), proc_macro2::Span::call_site());
         let ty = uint_for(f.size);
-        return (quote! { #[bits(#bits)] #ident: #ty }, quote!());
+        return (quote! { #[bits(#bits)] #ident: #ty }, quote!(), quote!());
     }
     let ident = Ident::new(
         AsSnakeCase(named.unwrap()).0,
@@ -160,10 +165,35 @@ fn field_tokens(
     let storage = uint_for(f.size).to_string();
     let b = proc_macro2::Literal::u32_unsuffixed(f.size as u32);
 
+    // The whole message is packed MSB-first (see `order = Msb` in
+    // `build_struct`), but a handful of upstream devices (e.g. the IMD)
+    // report a single field of an otherwise big-endian message
+    // little-endian. `bitfield_struct` has no per-field order knob, so
+    // instead we byte-swap that one field's *stored* bits via `from`/`into`:
+    // reversing them before the whole-struct `to_be_bytes()` runs makes just
+    // that field come out little-endian on the wire.
+    //
+    // Only plain, unscaled, byte-aligned integer fields are supported --
+    // composing the swap with a formatter or raw-f32 bit-pattern isn't
+    // needed by any current message, so it fails loudly instead of silently
+    // mis-encoding if one ever shows up.
+    let little_endian = f.endianness.as_deref() == Some("little");
+    if little_endian {
+        assert!(
+            f.size > 0 && f.size % 8 == 0,
+            "field `{ident}` (message `{struct_name}`) has endianness \"little\" but a {}-bit size; byte order is undefined for non-byte-aligned fields",
+            f.size
+        );
+    }
+
     // Scaled `f32` accessor: physical value in/out, raw integer stored. Also
     // emits `try_with_*` / `try_set_*` that reject values that can't be
     // represented in `f.size` bits (before `into` would saturate them).
     let scaled = |op: &str, arg: u32| -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
+        assert!(
+            !little_endian,
+            "field `{ident}` (message `{struct_name}`): endianness \"little\" on a scaled/formatted field isn't supported yet"
+        );
         let sp = if signed { "s" } else { "" };
         let from_fn = conv_path(&format!("{sp}{op}_from_{storage}"));
         let into_fn = conv_path(&format!("{sp}{op}_into_{storage}"));
@@ -224,11 +254,16 @@ fn field_tokens(
     // A raw 32-bit IEEE-754 float is stored verbatim (every bit pattern is
     // valid, so no range check is needed).
     if f.ieee754_f32.unwrap_or(false) {
+        assert!(
+            !little_endian,
+            "field `{ident}` (message `{struct_name}`): endianness \"little\" on a raw-f32 field isn't supported yet"
+        );
         return (
             quote! {
                 #[bits(#bits, from = f32::from_bits, into = f32::to_bits)]
                 pub #ident: f32
             },
+            quote!(),
             quote!(),
         );
     }
@@ -237,8 +272,14 @@ fn field_tokens(
     // see scaled! in cangen lib.rs
     if let Some(fmt) = &f.formatter {
         match fmt.key.as_str() {
-            "divide" => return scaled("div", fmt.arg as u32),
-            "multiply" => return scaled("mul", fmt.arg as u32),
+            "divide" => {
+                let (decl, checked) = scaled("div", fmt.arg as u32);
+                return (decl, checked, quote!());
+            }
+            "multiply" => {
+                let (decl, checked) = scaled("mul", fmt.arg as u32);
+                return (decl, checked, quote!());
+            }
             _ => {}
         }
     }
@@ -246,15 +287,41 @@ fn field_tokens(
     // splits up our c_type into 3 sections: float, bool, and uint/ints
     match f.c_type.as_deref() {
         // Unformatted float: identity scaling (divisor 1) so the accessor stays `f32`.
-        Some("float") => scaled("div", 1),
-        Some("bool") if f.size == 1 => (quote! { #[bits(#bits)] pub #ident: bool }, quote!()),
+        Some("float") => {
+            let (decl, checked) = scaled("div", 1);
+            (decl, checked, quote!())
+        }
+        Some("bool") if f.size == 1 => (
+            quote! { #[bits(#bits)] pub #ident: bool },
+            quote!(),
+            quote!(),
+        ),
         _ => {
             let ty = if signed {
                 int_for(f.size)
             } else {
                 uint_for(f.size)
             };
-            (quote! { #[bits(#bits)] pub #ident: #ty }, quote!())
+            if little_endian {
+                // `swap_bytes` is its own inverse, so one function serves as
+                // both `from` (read) and `into` (write).
+                let swap_fn = quote::format_ident!("__{struct_name}_{ident}_le_swap");
+                let helper = quote! {
+                    #[doc(hidden)]
+                    const fn #swap_fn(v: #ty) -> #ty { #ty::swap_bytes(v) }
+                };
+                let decl = quote! {
+                    #[bits(#bits, from = #swap_fn, into = #swap_fn)]
+                    pub #ident: #ty
+                };
+                (decl, quote!(), helper)
+            } else {
+                (
+                    quote! { #[bits(#bits)] pub #ident: #ty },
+                    quote!(),
+                    quote!(),
+                )
+            }
         }
     }
 }
@@ -304,11 +371,13 @@ fn build_struct(msg: CANMsg) -> proc_macro2::TokenStream {
 
     let mut field_declarations: Vec<proc_macro2::TokenStream> = Vec::new();
     let mut checked_methods: Vec<proc_macro2::TokenStream> = Vec::new();
+    let mut helper_items: Vec<proc_macro2::TokenStream> = Vec::new();
     for (i, f) in msg.points.iter().enumerate() {
         let docs = doc_attrs(doc_for.get(&(i + 1)).copied());
-        let (field, checked) = field_tokens(i, f);
+        let (field, checked, helpers) = field_tokens(&struct_name, i, f);
         field_declarations.push(quote! { #docs #field });
         checked_methods.push(checked);
+        helper_items.push(helpers);
     }
 
     // Fill the remainder of the backing integer with trailing padding.
@@ -326,8 +395,16 @@ fn build_struct(msg: CANMsg) -> proc_macro2::TokenStream {
     let ts = uint_for(bit_cnt);
 
     // Generate the final output Rust code
+    //
+    // `order = Msb` is required here: CAN messages are big-endian and points
+    // are declared in wire order (first point = first byte(s)), but
+    // `bitfield_struct` defaults to `Lsb`, which packs the first-declared
+    // field into the *low* bits of the backing integer. `to_can_frame` then
+    // does a single word-level `to_be_bytes()`, which would transpose the
+    // fields (and misplace trailing padding) instead of preserving their
+    // declared order on the wire.
     let expanded = quote! {
-        #[bitfield(#ts)]
+        #[bitfield(#ts, order = Msb)]
         pub struct #struct_name {
             #(#field_declarations),*
         }
@@ -352,5 +429,6 @@ fn build_struct(msg: CANMsg) -> proc_macro2::TokenStream {
         #tr
         #expanded
         #checked
+        #(#helper_items)*
     }
 }
