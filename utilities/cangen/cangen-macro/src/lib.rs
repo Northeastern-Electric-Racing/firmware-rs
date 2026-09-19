@@ -316,7 +316,11 @@ fn field_tokens(
                 };
                 (decl, quote!(), helper)
             } else {
-                (quote! { #[bits(#bits)] pub #ident: #ty }, quote!(), quote!())
+                (
+                    quote! { #[bits(#bits)] pub #ident: #ty },
+                    quote!(),
+                    quote!(),
+                )
             }
         }
     }
