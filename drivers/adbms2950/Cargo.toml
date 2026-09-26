@@ -1,5 +1,5 @@
 [package]
-name = "adbms6830b"
+name = "adbms2950"
 version = "0.1.0"
 edition = "2024"
 
@@ -9,9 +9,9 @@ default = []
 defmt = ["dep:defmt", "embassy-time/defmt", "embedded-hal-async/defmt-03"]
 
 [dependencies]
-embedded-hal-async.workspace = true
 bitfield-struct.workspace = true
 defmt = { workspace = true, optional = true }
+embedded-hal-async.workspace = true
 embassy-time.workspace = true
 adbms-register-macros = { path = "../adbms-register-macros" }
 
