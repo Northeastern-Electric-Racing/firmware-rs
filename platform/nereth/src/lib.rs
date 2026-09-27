@@ -37,9 +37,9 @@
 //!
 //!
 
-use core::cell::RefCell;
+use core::{cell::RefCell, str::FromStr};
 
-use defmt::{error, unwrap, warn};
+use defmt::{error, expect, unwrap, warn};
 use embassy_executor::Spawner;
 use embassy_net::{StackStorage, wire::IpCidr};
 use embassy_stm32::{
@@ -102,23 +102,41 @@ fn getrandom_custom(bytes: &mut [u8]) -> Result<(), getrandom::Error> {
 pub struct NerPublisher<'a> {
     publ: Publisher<'a, 'static, ZenohConfig>,
     enc: PbEncoder<heapless::Vec<u8, CAPACITY>>,
+    unit: &'static str,
 }
 
 impl<'a> NerPublisher<'a> {
-    pub(crate) fn new(publ: Publisher<'a, 'static, ZenohConfig>) -> Self {
+    pub(crate) fn new(publ: Publisher<'a, 'static, ZenohConfig>, unit: &'static str) -> Self {
         let under = heapless::Vec::<u8, CAPACITY>::new();
         NerPublisher {
             publ,
             enc: PbEncoder::new(under),
+            unit,
         }
     }
 
-    /// Publishes data.  Returns true if failure
+    /// Publishes data, taking in a ServerData object.  Returns true if failure
+    /// Only required if you need to override time or unit behavior
     pub async fn send(&mut self, payload: ServerData) -> bool {
         if let Err(e) = payload.encode(&mut self.enc) {
             warn!("Could not serialize protobuf, error {}", e);
             return true;
         }
+        self.release_and_clear().await
+    }
+
+    /// Publishes data, taking in a single point.  Returns true if failure
+    // note: heapless will compile time error if size too big
+    pub async fn send_values<const N: usize>(&mut self, value: [f32; N]) -> bool {
+        let payload = ServerData {
+            unit: heapless::String::from_str(self.unit).expect("Critical parse failure"),
+            time_us: 0, // TODO ptp
+            values: heapless::Vec::from_array(value),
+        };
+        self.send(payload).await
+    }
+
+    async fn release_and_clear(&mut self) -> bool {
         let res = match self.publ.put(self.enc.as_writer()).finish().await {
             Ok(()) => false,
             Err(e) => {
@@ -319,14 +337,23 @@ impl<const ID: u8> NerEth<ID> {
     }
 
     /// Retreives a publisher to send data over a topic.
-    pub async fn get_publisher<'a>(&self, key: &'a str) -> Option<NerPublisher<'a>> {
+    pub async fn get_publisher<'a>(
+        &self,
+        key: &'a str,
+        unit: Option<&'static str>,
+    ) -> Option<NerPublisher<'a>> {
+        // TODO: make compile time
+        let test = ServerData::default();
+        let unit = unit.unwrap_or("");
+        assert!(unit.len() < test.unit.capacity(), "Unit too big!");
+
         match self
             .session
-            .declare_publisher(keyexpr::from_str_unchecked(key))
+            .declare_publisher(expect!(keyexpr::new(key), "Invalid key expression"))
             .finish()
             .await
         {
-            Ok(res) => Some(NerPublisher::new(res)),
+            Ok(res) => Some(NerPublisher::new(res, unit)),
             Err(e) => {
                 warn!("Could not create publisher: {}", e);
                 None
