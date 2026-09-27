@@ -20,6 +20,53 @@ use embedded_can::{ExtendedId, StandardId};
 
 use heapless::Vec;
 
+// Ripped from shep3 code because it works there
+pub mod interrupts {
+    use core::sync::atomic::{AtomicU32, Ordering};
+
+    /// Number of times the FDCAN2 IT0 interrupt has fired.
+    pub static IT0_IRQ_COUNT: AtomicU32 = AtomicU32::new(0);
+    /// Number of times the FDCAN2 IT1 interrupt has fired.
+    pub static IT1_IRQ_COUNT: AtomicU32 = AtomicU32::new(0);
+
+    /// Counts FDCAN2 IT0 entries. Also clears the TCF flag. This runs alongside embassy's internal ISR (it doesn't replace it or anything)
+    struct It0Counter;
+    impl
+        embassy_stm32::interrupt::typelevel::Handler<
+            embassy_stm32::interrupt::typelevel::FDCAN2_IT0,
+        > for It0Counter
+    {
+        unsafe fn on_interrupt() {
+            // Clear IR.TCF (transmission cancellation finished) interrupt flag.
+            // We need to do this because we enable this interrupt manually and embassy doesn't clear this in its internal interrupt handler.
+            let regs = embassy_stm32::pac::FDCAN2;
+            if regs.ir().read().tcf() {
+                regs.ir().write(|w| w.set_tcf(true));
+            }
+
+            IT0_IRQ_COUNT.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Counts FDCAN2 IT1 entries. This runs alongside embassy's internal ISR (it doesn't replace it or anything)
+    struct It1Counter;
+    impl
+        embassy_stm32::interrupt::typelevel::Handler<
+            embassy_stm32::interrupt::typelevel::FDCAN2_IT1,
+        > for It1Counter
+    {
+        unsafe fn on_interrupt() {
+            IT1_IRQ_COUNT.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    embassy_stm32::bind_interrupts!(pub struct Irqs {
+        // NOTE: `It0Counter` is listed first on purpose so it runs before the embassy ISR handler.
+        FDCAN2_IT0 => It0Counter, embassy_stm32::can::IT0InterruptHandler<embassy_stm32::peripherals::FDCAN2>;
+        FDCAN2_IT1 => embassy_stm32::can::IT1InterruptHandler<embassy_stm32::peripherals::FDCAN2>, It1Counter;
+    });
+}
+
 pub struct NerCan {
     pub can_configurator: CanConfigurator<'static>,
     used_std_slots: Vec<StandardFilterSlot, 28>,
@@ -38,7 +85,7 @@ impl NerCan {
     /// - Transmit pause enabled.
     /// - A global filter that rejects all frames by default.
     ///
-    /// ** It is expected that the user manually configures the CAn Std and Extended Filters before running the can_handler task
+    /// ** It is expected that the user manually configures the CAN Std and Extended Filters before running the can_handler task
     /// ** Hardcodes bitrate to 500 kbit/s, if CAN sampling causes issues, this must be adjusted in this lib
     pub fn init(mut can_configurator: CanConfigurator<'static>) -> Self {
         use embassy_stm32::can::config::*;
@@ -58,9 +105,11 @@ impl NerCan {
             used_ext_slots: Vec::new(),
         }
     }
-
+    #[must_use]
     /// Sets adds a new CAN Standard Filter at the given slot
     /// NOTE: will panic if the given slot is already in use
+    /// Additionaly, the must_use flag is set, as a new NerCan object is returied. Discarding the
+    /// value would be a waste of time
     pub fn add_standard_filter(
         mut self,
         std_filter_slot: StandardFilterSlot,
@@ -92,8 +141,11 @@ impl NerCan {
         self
     }
 
+    #[must_use]
     /// Sets adds a new CAN Extended Filter at the given slot
     /// NOTE: will panic if the given slot is already in use
+    /// Additionaly, the must_use flag is set, as a new NerCan object is returied. Discarding the
+    /// value would be a waste of time
     pub fn add_extended_filter(
         mut self,
         ext_filter_slot: ExtendedFilterSlot,
