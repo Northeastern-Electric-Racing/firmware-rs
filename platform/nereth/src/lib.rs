@@ -106,9 +106,10 @@ pub struct NerPublisher<'a> {
 
 impl<'a> NerPublisher<'a> {
     pub(crate) fn new(publ: Publisher<'a, 'static, ZenohConfig>) -> Self {
+        let under = heapless::Vec::<u8, CAPACITY>::new();
         NerPublisher {
             publ,
-            enc: PbEncoder::new(heapless::Vec::<u8, CAPACITY>::new()),
+            enc: PbEncoder::new(under),
         }
     }
 
@@ -118,7 +119,7 @@ impl<'a> NerPublisher<'a> {
             warn!("Could not serialize protobuf, error {}", e);
             return true;
         }
-        match self.publ.put(self.enc.as_writer()).finish().await {
+        let res = match self.publ.put(self.enc.as_writer()).finish().await {
             Ok(()) => false,
             Err(e) => {
                 warn!(
@@ -128,7 +129,11 @@ impl<'a> NerPublisher<'a> {
                 );
                 true
             }
-        }
+        };
+
+        self.enc = PbEncoder::new(heapless::Vec::<u8, CAPACITY>::new());
+
+        res
     }
 }
 
