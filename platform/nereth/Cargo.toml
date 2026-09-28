@@ -1,0 +1,11 @@
+[package]
+name = "nereth"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+embassy-stm32.workspace = true
+embassy-net.workspace = true
+embassy-executor.workspace = true
+static_cell.workspace = true
+defmt.workspace = true
