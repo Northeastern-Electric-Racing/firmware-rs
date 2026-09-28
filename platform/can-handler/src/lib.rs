@@ -37,8 +37,23 @@
 //! spawner.spawn(can_rx(rx, INCOMING.dyn_sender())
 //!     .expect("Failed to spawn can_handler::can_rx()."));
 //! ```
+//!
+//! # `defmt-monitor` feature
+//!
+//! Enabling the `defmt-monitor` feature publishes TX/RX counters from [`can_tx`]
+//! and [`can_rx`] through `defmt_monitor::monitor!()` under the `CanDebug/`
+//! topic, and adds a `can_props` task that samples FDCAN health registers:
+//!
+//! ```ignore
+//! spawner.spawn(can_props(embassy_stm32::pac::FDCAN2)
+//!     .expect("Failed to spawn can_handler::can_props()."));
+//! ```
+//!
+//! With the feature off, none of this is compiled in. With it on, the calls can
+//! still be compiled out by building with `DEFMT_MONITOR=off`.
 #![no_std]
 use defmt::warn;
+use embassy_futures::select::{Either, select};
 use embassy_stm32::can::filter::FilterType::{DedicatedDual, DedicatedSingle};
 use embassy_stm32::can::filter::{
     Action, EXTENDED_FILTER_MAX, ExtendedFilter, ExtendedFilterSlot, STANDARD_FILTER_MAX,
@@ -46,9 +61,24 @@ use embassy_stm32::can::filter::{
 };
 use embassy_stm32::can::{CanConfigurator, CanRx, CanTx, Frame, Properties};
 use embassy_sync::channel::{DynamicReceiver, DynamicSender, TrySendError};
+use embassy_time::Timer;
 use embedded_can::{ExtendedId, StandardId};
 
 use heapless::Vec;
+
+/// Forwards to `defmt_monitor::monitor!()` when the `defmt-monitor` feature is
+/// enabled. Otherwise it expands to nothing but still borrows its arguments, so
+/// counters that only exist to be monitored don't trip unused warnings.
+#[cfg(feature = "defmt-monitor")]
+macro_rules! monitor {
+    ($($tt:tt)*) => { defmt_monitor::monitor!($($tt)*) };
+}
+#[cfg(not(feature = "defmt-monitor"))]
+macro_rules! monitor {
+    ($topic:expr, desc = $desc:literal, $fmt:literal $(, $arg:expr)* $(,)?) => {{
+        $( let _ = &$arg; )*
+    }};
+}
 
 /// Number of standard filter elements in FDCAN message RAM.
 const STANDARD_FILTER_SLOTS: usize = STANDARD_FILTER_MAX as usize;
@@ -192,9 +222,6 @@ impl NerCan {
     }
 
     /// Starts up CAN in normal mode and returns the split objects.
-    ///
-    /// Call this only once every filter is in place: filters are written through
-    /// the configurator, which this consumes.
     pub fn start(self) -> (CanTx<'static>, CanRx<'static>, Properties) {
         self.can_configurator.into_normal_mode().split()
     }
@@ -239,14 +266,61 @@ pub async fn can_tx(
     outgoing_rx: DynamicReceiver<'static, Frame>,
     outgoing_tx: DynamicSender<'static, Frame>,
 ) -> ! {
+    let mut send_count: u32 = 0;
+    let mut dropped_due_to_outgoing_full_count: u32 = 0;
+    let mut dropped_due_to_stalled_tx_count: u32 = 0;
+
     loop {
         let frame = outgoing_rx.receive().await;
 
-        // `write` returns a lower-priority frame if it had to bump one out of a
-        // mailbox to make room. Put it back on the queue rather than dropping it.
-        if let Some(evicted) = tx.write(&frame).await {
-            send(outgoing_tx, evicted).await;
+        match select(tx.write(&frame), Timer::after_millis(50)).await {
+            // Case: frame was dropped
+            Either::First(Some(dropped)) => {
+                // If we dropped a frame, try to send it back to OUTGOING so it can get sent again.
+                // We can't do a normal `send().await` since this task is the one that drains OUTGOING, so doing
+                // that could probably cause a deadlock somehow.
+                match outgoing_tx.try_send(dropped) {
+                    Ok(_) => (),
+                    Err(_) => {
+                        dropped_due_to_outgoing_full_count += 1;
+                        warn!(
+                            "Had to drop an outgoing CAN frame because OUTGOING was full! Not good."
+                        );
+                    }
+                }
+            }
+
+            // Case: frame was sent successfully
+            Either::First(None) => send_count += 1,
+
+            // Case: The Timer::after await returned before tx.write(), so CAN TX has stalled and we drop the frame.
+            // the "stall" shouldn't be a permanant thing, we just need to make sure this task can't sleep forever.
+            Either::Second(_) => {
+                dropped_due_to_stalled_tx_count += 1;
+                warn!(
+                    "Had to drop an outgoing CAN frame because CAN TX stalled! Probably not good."
+                );
+            }
         }
+
+        monitor!(
+            "CanDebug/send_count",
+            desc = "Send count",
+            "{=u32}",
+            send_count
+        );
+        monitor!(
+            "CanDebug/dropped_due_to_outgoing_full_count",
+            desc = "Frames dropped due to the OUTGOING channel being full.",
+            "{=u32}",
+            dropped_due_to_outgoing_full_count
+        );
+        monitor!(
+            "CanDebug/dropped_due_to_stalled_tx_count",
+            desc = "Frames dropped due to TX stalling.",
+            "{=u32}",
+            dropped_due_to_stalled_tx_count
+        );
     }
 }
 
@@ -258,10 +332,220 @@ pub async fn can_tx(
 /// **The channel behind `incoming_tx` is not intended to be the one `can_tx` drains.
 #[embassy_executor::task]
 pub async fn can_rx(mut rx: CanRx<'static>, incoming_tx: DynamicSender<'static, Frame>) -> ! {
+    let mut rx_count: u32 = 0;
+    let mut rx_err_count: u32 = 0;
+
     loop {
         match rx.read().await {
-            Ok(envelope) => incoming_tx.send(envelope.frame).await,
-            Err(err) => warn!("Bus error! {}", err),
+            Ok(envelope) => {
+                incoming_tx.send(envelope.frame).await;
+                rx_count += 1;
+            }
+            Err(err) => {
+                warn!("Bus error! {}", err);
+                rx_err_count += 1;
+            }
         }
+
+        monitor!("CanDebug/rx_count", desc = "RX count", "{=u32}", rx_count);
+        monitor!(
+            "CanDebug/rx_err_count",
+            desc = "RX err count",
+            "{=u32}",
+            rx_err_count
+        );
+    }
+}
+
+/// Publishes FDCAN health diagnostics read straight from the peripheral registers.
+///
+/// - `regs` is the FDCAN instance the handler was started on, e.g.
+///   `embassy_stm32::pac::FDCAN2`.
+///
+/// Samples every 500 ms. Only available with the `defmt-monitor` feature.
+#[cfg(feature = "defmt-monitor")]
+#[embassy_executor::task]
+pub async fn can_props(regs: embassy_stm32::pac::can::Fdcan) -> ! {
+    use embassy_stm32::can::enums::BusErrorMode;
+
+    /// Number of hardware TX mailboxes on STM32H563.
+    const TX_MAILBOX_COUNT: usize = 3;
+    /// How often this task should run, in ms.
+    const PROPS_SAMPLE_PERIOD_MS: u64 = 500;
+
+    loop {
+        // Readings from CAN registers.
+        let psr = regs.psr().read();
+        let ecr = regs.ecr().read();
+        let cccr = regs.cccr().read();
+        let ir = regs.ir().read();
+        let ie = regs.ie().read();
+        let ils = regs.ils().read();
+        let ile = regs.ile().read();
+        let txfqs = regs.txfqs().read();
+        let txbrp = regs.txbrp().read();
+        let txbto = regs.txbto().read();
+        let txbcf = regs.txbcf().read();
+
+        // Find error mode. This is what embassy does internally (at least as of writing this).
+        let bus_error_mode = match (psr.bo(), psr.ep()) {
+            (false, false) => BusErrorMode::ErrorActive,
+            (false, true) => BusErrorMode::ErrorPassive,
+            (true, _) => BusErrorMode::BusOff,
+        };
+
+        // One bit per hardware TX mailbox.
+        let mut pending_mask = 0_u8;
+        let mut occurred_mask = 0_u8;
+        let mut cancelled_mask = 0_u8;
+        let mut pending_count = 0_u8;
+        for i in 0..TX_MAILBOX_COUNT {
+            if txbrp.trp(i) {
+                pending_mask |= 1_u8 << i;
+                pending_count += 1_u8;
+            }
+            if txbto.to(i) {
+                occurred_mask |= 1_u8 << i;
+            }
+            if txbcf.cf(i) {
+                cancelled_mask |= 1_u8 << i;
+            }
+        }
+
+        // Error counters and protocol status.
+        monitor!(
+            "CanDebug/tx_error_count",
+            desc = "FDCAN TEC (ECR.TEC). Climbs by 8 per failed transmission. >255 means bus-off.",
+            "{=u8}",
+            ecr.tec()
+        );
+        monitor!(
+            "CanDebug/rx_error_count",
+            desc = "FDCAN REC (ECR.REC).",
+            "{=u8}",
+            ecr.rec()
+        );
+        monitor!(
+            "CanDebug/bus_error_mode",
+            desc = "FDCAN bus error state, from PSR.BO/PSR.EP.",
+            "{}",
+            bus_error_mode
+        );
+        monitor!(
+            "CanDebug/error_warning",
+            desc = "PSR.EW. An error counter has passed 96.",
+            "{=bool}",
+            psr.ew()
+        );
+        monitor!(
+            "CanDebug/node_activity",
+            desc = "PSR.ACT. SYNC=still synchronizing to the bus, IDLE=neither sending nor receiving, RX/TX=actively on the bus.",
+            "{}",
+            psr.act()
+        );
+
+        // TX mailbox occupancy.
+        monitor!(
+            "CanDebug/tx_pending_mask",
+            desc = "TXBRP, one bit per mailbox. Set bit means a transmission is requested and not yet finished.",
+            "{=u8}",
+            pending_mask
+        );
+        monitor!(
+            "CanDebug/tx_pending_count",
+            desc = "Number of TX mailboxes with a pending request, 0 to 3.",
+            "{=u8}",
+            pending_count
+        );
+        monitor!(
+            "CanDebug/tx_occurred_mask",
+            desc = "TXBTO, one bit per mailbox. Set bit means a frame was successfully transmitted. Stays 0 if nothing has ever reached the bus.",
+            "{=u8}",
+            occurred_mask
+        );
+        monitor!(
+            "CanDebug/tx_cancelled_mask",
+            desc = "TXBCF, one bit per mailbox. Set bit means a transmission was cancelled.",
+            "{=u8}",
+            cancelled_mask
+        );
+        monitor!(
+            "CanDebug/tx_fifo_full",
+            desc = "TXFQS.TFQF. No free mailbox.",
+            "{=bool}",
+            txfqs.tfqf()
+        );
+        monitor!(
+            "CanDebug/tx_fifo_free_level",
+            desc = "TXFQS.TFFL. Number of consecutive free mailboxes. Reads 0 in queue mode (TXBC.TFQM=1).",
+            "{=u8}",
+            txfqs.tffl()
+        );
+        monitor!(
+            "CanDebug/tx_put_index",
+            desc = "TXFQS.TFQPI. The mailbox the next write goes into.",
+            "{=u8}",
+            txfqs.tfqpi()
+        );
+
+        // Interrupts.
+        monitor!(
+            "CanDebug/ir_tc_latched",
+            desc = "IR.TC still set at sample time. Embassy's ISR clears this on entry, so persistently true means the ISR is not running.",
+            "{=bool}",
+            ir.tc()
+        );
+        monitor!(
+            "CanDebug/ir",
+            desc = "Raw FDCAN IR, all latched interrupt flags.",
+            "{=u32}",
+            ir.0
+        );
+        monitor!(
+            "CanDebug/ie",
+            desc = "Raw FDCAN IE, enabled interrupt sources.",
+            "{=u32}",
+            ie.0
+        );
+        monitor!(
+            "CanDebug/ils",
+            desc = "Raw FDCAN ILS, interrupt line select.",
+            "{=u32}",
+            ils.0
+        );
+        monitor!(
+            "CanDebug/ile",
+            desc = "Raw FDCAN ILE, interrupt line enable.",
+            "{=u32}",
+            ile.0
+        );
+
+        // Operating mode.
+        monitor!(
+            "CanDebug/cccr_init",
+            desc = "CCCR.INIT. True means the peripheral is held out of bus traffic, which hardware does on bus-off.",
+            "{=bool}",
+            cccr.init()
+        );
+        monitor!(
+            "CanDebug/cccr_dar",
+            desc = "CCCR.DAR. True means automatic retransmission is disabled, so a failed frame is discarded after one attempt.",
+            "{=bool}",
+            cccr.dar()
+        );
+        monitor!(
+            "CanDebug/cccr_mon",
+            desc = "CCCR.MON. Bus monitoring mode. True means we never drive the bus dominant.",
+            "{=bool}",
+            cccr.mon()
+        );
+        monitor!(
+            "CanDebug/cccr_test",
+            desc = "CCCR.TEST. True in loopback modes.",
+            "{=bool}",
+            cccr.test()
+        );
+
+        Timer::after_millis(PROPS_SAMPLE_PERIOD_MS).await;
     }
 }
