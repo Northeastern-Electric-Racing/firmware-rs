@@ -66,9 +66,7 @@ pub trait ToCanFrame: Sized + Into<Self::Repr> {
 
     fn to_can_frame<F: Frame>(self) -> F {
         // Default assoc consts are only evaluated when referenced, so these
-        // force the compile-time bounds check they exist for -- without this,
-        // an out-of-range `LEN`/`Repr` silently skips straight to a runtime
-        // panic on the slice below instead of failing the build.
+        // force the compile-time bounds check
         let _: () = Self::CHECK_BITS_FIT;
         let _: () = Self::CHECK_LEN;
 
@@ -86,17 +84,12 @@ pub trait ToCanFrame: Sized + Into<Self::Repr> {
 /// failing; use the `try_*` variants when you need to detect the condition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OutOfRange {
-    /// The field (snake_case accessor name) that rejected the value.
+    /// The field that rejected the value.
     pub field: &'static str,
 }
 
 /// Scaled fixed-point conversion helpers used by the generated bitfields.
 ///
-/// Every generated numeric field exposes the *physical* value as an `f32`
-/// (the Rust equivalent of the C `float` the definitions use), while the
-/// bitfield stores a raw `N`-bit integer. These `const` functions apply the
-/// divisor / multiplier from the JSON `formatter` spec and, for signed
-/// fields, sign-extend the stored bits.
 ///
 /// They are referenced by the `#[bits(N, from = .., into = ..)]` attributes
 /// that `generate_all_messages!` emits, e.g.

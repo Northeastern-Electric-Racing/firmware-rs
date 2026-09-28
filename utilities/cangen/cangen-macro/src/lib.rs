@@ -132,7 +132,7 @@ fn doc_attrs(nf: Option<&NetField>) -> proc_macro2::TokenStream {
 /// up front (`bitfield_struct`'s own `*_checked` would always succeed here).
 ///
 /// Plain integers and booleans use `bitfield_struct`'s native support (their
-/// `*_checked` already work). Unnamed or `parse: false` points become
+/// `*_checked` work). Unnamed or `parse: false` points become
 /// `_reserved` padding.
 ///
 /// Returns `(field_declaration, checked_accessor_methods)`; the second is empty
@@ -142,9 +142,9 @@ fn field_tokens(
     i: usize,
     f: &definition_rs::CANPoint,
 ) -> (
-    proc_macro2::TokenStream, // field declaration (struct-scoped)
-    proc_macro2::TokenStream, // checked accessor methods (impl-scoped)
-    proc_macro2::TokenStream, // byte-swap helper fns (module-scoped)
+    proc_macro2::TokenStream, // field declaration
+    proc_macro2::TokenStream, // checked accessor methods
+    proc_macro2::TokenStream, // byte-swap helper fns
 ) {
     let bits = proc_macro2::Literal::usize_unsuffixed(f.size);
     let signed = f.signed.unwrap_or(false);
@@ -166,17 +166,11 @@ fn field_tokens(
     let b = proc_macro2::Literal::u32_unsuffixed(f.size as u32);
 
     // The whole message is packed MSB-first (see `order = Msb` in
-    // `build_struct`), but a handful of upstream devices (e.g. the IMD)
-    // report a single field of an otherwise big-endian message
-    // little-endian. `bitfield_struct` has no per-field order knob, so
-    // instead we byte-swap that one field's *stored* bits via `from`/`into`:
-    // reversing them before the whole-struct `to_be_bytes()` runs makes just
-    // that field come out little-endian on the wire.
+    // `build_struct`), so it is big endian by default.
+    // However, some fields are little endian per-field, so we can swap the bits
+    // in the macro creating the conversion.
     //
-    // Only plain, unscaled, byte-aligned integer fields are supported --
-    // composing the swap with a formatter or raw-f32 bit-pattern isn't
-    // needed by any current message, so it fails loudly instead of silently
-    // mis-encoding if one ever shows up.
+    // Only byte-aligned fields are allowed to be marked little endian
     let little_endian = f.endianness.as_deref() == Some("little");
     if little_endian {
         assert!(
@@ -186,9 +180,9 @@ fn field_tokens(
         );
     }
 
-    // Scaled `f32` accessor: physical value in/out, raw integer stored. Also
+    // Scaled `f32` accessor.
     // emits `try_with_*` / `try_set_*` that reject values that can't be
-    // represented in `f.size` bits (before `into` would saturate them).
+    // represented in `f.size` bits (in the underlying repr).
     let scaled = |op: &str, arg: u32| -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
         assert!(
             !little_endian,
@@ -251,8 +245,7 @@ fn field_tokens(
         (decl, checked)
     };
 
-    // A raw 32-bit IEEE-754 float is stored verbatim (every bit pattern is
-    // valid, so no range check is needed).
+    // A raw 32-bit IEEE-754 float is directly captured.
     if f.ieee754_f32.unwrap_or(false) {
         assert!(
             !little_endian,
@@ -268,8 +261,7 @@ fn field_tokens(
         );
     }
 
-    // this turns our human language into the div/multiply functions
-    // see scaled! in cangen lib.rs
+    // map to the macro-generated functions inside of the main crate
     if let Some(fmt) = &f.formatter {
         match fmt.key.as_str() {
             "divide" => {
@@ -361,7 +353,6 @@ fn build_struct(msg: CANMsg) -> proc_macro2::TokenStream {
     };
 
     // Map each 1-indexed point position to the `NetField` that documents it.
-    // A field's `values` may list several points (e.g. IMU x/y/z share a doc).
     let mut doc_for: std::collections::HashMap<usize, &NetField> = std::collections::HashMap::new();
     for nf in &msg.fields {
         for &v in &nf.values {
@@ -395,14 +386,6 @@ fn build_struct(msg: CANMsg) -> proc_macro2::TokenStream {
     let ts = uint_for(bit_cnt);
 
     // Generate the final output Rust code
-    //
-    // `order = Msb` is required here: CAN messages are big-endian and points
-    // are declared in wire order (first point = first byte(s)), but
-    // `bitfield_struct` defaults to `Lsb`, which packs the first-declared
-    // field into the *low* bits of the backing integer. `to_can_frame` then
-    // does a single word-level `to_be_bytes()`, which would transpose the
-    // fields (and misplace trailing padding) instead of preserving their
-    // declared order on the wire.
     let expanded = quote! {
         #[bitfield(#ts, order = Msb)]
         pub struct #struct_name {
