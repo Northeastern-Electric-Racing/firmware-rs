@@ -7,7 +7,7 @@
 //! and Table 55 on page 61 of the datasheet.
 
 use bitfield_struct::{bitfield, bitenum};
-use adbms6830b_macros::BitfieldEnumDefault;
+use adbms_register_macros::BitfieldEnumDefault;
 
 use super::register_group;
 use super::super::commands;

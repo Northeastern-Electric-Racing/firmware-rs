@@ -3,7 +3,7 @@
 //! See the "COMM REGISTER" section on page 42 of the datasheet, as well as the "I2C/SPI MASTER USING GPIOS" section directly above it.
 
 use bitfield_struct::{bitfield, bitenum};
-use adbms6830b_macros::BitfieldEnumDefault;
+use adbms_register_macros::BitfieldEnumDefault;
 
 use super::register_group;
 use super::super::commands;
