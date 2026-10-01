@@ -24,6 +24,22 @@ pub enum LineId {
     B,
 }
 
+/// How a call to [`Api::snapped`] failed.
+///
+/// Kept separate from the body's error so a caller can tell "the window never opened" and "the
+/// window was left open" apart from "the reads inside it failed". Those mean different things:
+/// a failed `UNSNAP` leaves the device frozen, so the next reads come back stale.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum SnappedError<SPI, E> {
+    /// `SNAP` failed, so the body never ran.
+    Snap(Error<SPI>),
+    /// The body returned an error. The window was still closed.
+    Body(E),
+    /// The body succeeded but `UNSNAP` failed, so the device is still frozen.
+    Unsnap(Error<SPI>),
+}
+
 /// Which overcurrent comparator channel a result code came from.
 ///
 /// Needed because each channel has its own gain bit in `ConfigB`.
@@ -304,6 +320,26 @@ impl<SPI: SpiDevice> Api<SPI> {
                 self.note_error();
                 Err(err)
             }
+        }
+    }
+
+    /// Runs `f` with the result registers frozen, then unfreezes them.
+    pub async fn snapped<E>(
+        &mut self,
+        f: impl AsyncFnOnce(&mut Self) -> Result<(), E>,
+    ) -> Result<(), SnappedError<SPI::Error, E>> {
+        self.command(commands::misc::snap())
+            .await
+            .map_err(SnappedError::Snap)?;
+
+        let body = f(self).await;
+        let unsnap = self.command(commands::misc::unsnap()).await;
+
+        // The body's error is the more informative one, so it wins over a failed unsnap.
+        match (body, unsnap) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(err), _) => Err(SnappedError::Body(err)),
+            (Ok(_), Err(err)) => Err(SnappedError::Unsnap(err)),
         }
     }
 
