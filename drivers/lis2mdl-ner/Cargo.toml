@@ -1,0 +1,10 @@
+[package]
+name = "lis2mdl-ner"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lis2mdl-rs = "2.0.0"
+embedded-hal-async.workspace = true
+defmt.workspace = true
+st-mems-bus = "2.0.0"
