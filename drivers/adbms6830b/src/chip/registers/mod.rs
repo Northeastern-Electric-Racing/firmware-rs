@@ -79,10 +79,10 @@ pub(in crate::chip) mod table107 {
             if microvolts < Self::MIN_MICROVOLTS || microvolts > Self::MAX_MICROVOLTS { return None; }
 
             let numerator = microvolts - Self::OFFSET_MICROVOLTS;
-            let code = if numerator >= 0 {
-                (numerator + Self::REGISTER_LSB_MICROVOLTS / 2) / Self::REGISTER_LSB_MICROVOLTS
+            let code = if numerator >= 0_i32 {
+                (numerator + Self::REGISTER_LSB_MICROVOLTS / 2_i32) / Self::REGISTER_LSB_MICROVOLTS
             } else {
-                (numerator - Self::REGISTER_LSB_MICROVOLTS / 2) / Self::REGISTER_LSB_MICROVOLTS
+                (numerator - Self::REGISTER_LSB_MICROVOLTS / 2_i32) / Self::REGISTER_LSB_MICROVOLTS
             };
 
             // Store the two's complement representation.
@@ -226,10 +226,10 @@ pub(in crate::chip) mod table107 {
             if microvolts < Self::VPV_MIN_MICROVOLTS || microvolts > Self::VPV_MAX_MICROVOLTS { return None; }
 
             let numerator = microvolts - Self::VPV_OFFSET_MICROVOLTS;
-            let code = if numerator >= 0 {
-                (numerator + Self::VPV_LSB_MICROVOLTS / 2) / Self::VPV_LSB_MICROVOLTS
+            let code = if numerator >= 0_i32 {
+                (numerator + Self::VPV_LSB_MICROVOLTS / 2_i32) / Self::VPV_LSB_MICROVOLTS
             } else {
-                (numerator - Self::VPV_LSB_MICROVOLTS / 2) / Self::VPV_LSB_MICROVOLTS
+                (numerator - Self::VPV_LSB_MICROVOLTS / 2_i32) / Self::VPV_LSB_MICROVOLTS
             };
 
             // Store the two's complement representation.
@@ -371,10 +371,10 @@ pub(in crate::chip) mod table107 {
             let numerator = microcelsius - Self::ITMP_OFFSET_MICROCELSIUS;
 
             // cool rounding
-            let code = if numerator >= 0 {
-                (numerator + Self::ITMP_LSB_MICROCELSIUS / 2) / Self::ITMP_LSB_MICROCELSIUS
+            let code = if numerator >= 0_i32 {
+                (numerator + Self::ITMP_LSB_MICROCELSIUS / 2_i32) / Self::ITMP_LSB_MICROCELSIUS
             } else {
-                (numerator - Self::ITMP_LSB_MICROCELSIUS / 2) / Self::ITMP_LSB_MICROCELSIUS
+                (numerator - Self::ITMP_LSB_MICROCELSIUS / 2_i32) / Self::ITMP_LSB_MICROCELSIUS
             };
 
             // Store the two's complement representation.
