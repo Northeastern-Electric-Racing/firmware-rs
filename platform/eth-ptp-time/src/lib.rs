@@ -71,7 +71,7 @@ impl HardwareClock for Stm32EthPtpClock {
     }
 
     fn adjust_time(&self, time_ns: i32) {
-        if time_ns >= 0 {
+        if time_ns >= 0_i32 {
             pac::ETH
                 .ethernet_mac()
                 .macstnur()

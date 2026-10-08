@@ -9,8 +9,6 @@ exclude = ["utilities/cangen/cangen-macro"]
 defmt = "1"
 
 embedded-hal = { version = "1" }
-embedded-hal-bus = { version = "0.3", features = ["async"] }
-embedded-io-async = { version = "0.7", features = ["defmt"] }
 embedded-hal-async = { version = "1" }
 embedded-can = "0.4.1"
 bitfield-struct = "0.13"

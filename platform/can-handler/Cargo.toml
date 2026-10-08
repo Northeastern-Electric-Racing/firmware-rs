@@ -6,14 +6,22 @@ edition = "2024"
 [dependencies]
 
 embassy-futures = "0.1.2"
-embassy-sync = "0.8.0"
+embassy-sync.workspace = true
 
 defmt.workspace = true
 embedded-can.workspace = true
 heapless = "0.9.3"
+embassy-time.workspace = true
+embassy-futures = "0.1.2"
+defmt-monitor = { git = "https://github.com/bjackson312006/defmt-monitor.git", branch = "main", optional = true }
+
 
 embassy-stm32.workspace = true
 embassy-executor.workspace = true
+
+[features]
+defmt-monitor = ["dep:defmt-monitor", "embassy-stm32/unstable-pac"]
+
 
 [lints]
 workspace = true

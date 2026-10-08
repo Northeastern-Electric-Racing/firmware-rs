@@ -105,7 +105,7 @@ impl DataPecRx {
     ///
     /// See Table 32 of the datasheet.
     pub const fn from_bytes(bytes: [u8; 2]) -> Self {
-        let raw = ((bytes[0] as u16) << 8) | bytes[1] as u16;
+        let raw = ((bytes[0] as u16) << 8_i32) | bytes[1] as u16;
         Self { inner: DataPec::new(raw) }
     }
 
@@ -145,8 +145,8 @@ const fn pec15_calc(data: &[u8]) -> u16 {
     let mut i = 0;
     while i < data.len() {
         // calculate PEC table address
-        let addr = (((remainder >> 7) ^ data[i] as u16) & 0xff) as usize;
-        remainder = (remainder << 8) ^ CRC15_TABLE[addr];
+        let addr = (((remainder >> 7_i32) ^ data[i] as u16) & 0xff) as usize;
+        remainder = (remainder << 8_i32) ^ CRC15_TABLE[addr];
         i += 1;
     }
     // The CRC15 has a 0 in the LSB, so the remainder is multiplied by 2.
@@ -167,34 +167,34 @@ const fn pec10_calc(data: &[u8], rx_ccnt: Option<u8>) -> u16 {
     let mut byte_index = 0;
     while byte_index < n {
         // Bring the next byte into the remainder.
-        remainder ^= (data[byte_index] as u16) << 2;
+        remainder ^= (data[byte_index] as u16) << 2_i32;
         // Perform modulo-2 division, a bit at a time.
-        let mut bit_index = 8;
-        while bit_index > 0 {
+        let mut bit_index = 8_i32;
+        while bit_index > 0_i32 {
             if remainder & 0x200 != 0 {
-                remainder = (remainder << 1) ^ POLYNOMIAL;
+                remainder = (remainder << 1_i32) ^ POLYNOMIAL;
             } else {
-                remainder <<= 1;
+                remainder <<= 1_i32;
             }
-            bit_index -= 1;
+            bit_index -= 1_i32;
         }
         byte_index += 1;
     }
 
     // If the array is from a received buffer, add the command counter to the CRC.
     if let Some(command_counter) = rx_ccnt {
-        remainder ^= ((command_counter as u16) & 0x3F) << 4;
+        remainder ^= ((command_counter as u16) & 0x3F) << 4_i32;
     }
 
     // Perform modulo-2 division, a bit at a time.
-    let mut bit_index = 6;
-    while bit_index > 0 {
+    let mut bit_index = 6_i32;
+    while bit_index > 0_i32 {
         if remainder & 0x200 != 0 {
-            remainder = (remainder << 1) ^ POLYNOMIAL;
+            remainder = (remainder << 1_i32) ^ POLYNOMIAL;
         } else {
-            remainder <<= 1;
+            remainder <<= 1_i32;
         }
-        bit_index -= 1;
+        bit_index -= 1_i32;
     }
 
     remainder & 0x3FF
@@ -214,25 +214,25 @@ const fn pec10_calc_table(data: &[u8], rx_ccnt: Option<u8>) -> u16 {
     let mut byte_index = 0;
     while byte_index < n {
         // calculate PEC table address
-        let addr = (((remainder >> 2) ^ data[byte_index] as u16) & 0xff) as usize;
-        remainder = (remainder << 8) ^ CRC10_TABLE[addr];
+        let addr = (((remainder >> 2_i32) ^ data[byte_index] as u16) & 0xff) as usize;
+        remainder = (remainder << 8_i32) ^ CRC10_TABLE[addr];
         byte_index += 1;
     }
 
     // If the array is from a received buffer, add the command counter to the CRC.
     if let Some(command_counter) = rx_ccnt {
-        remainder ^= ((command_counter as u16) & 0x3F) << 4;
+        remainder ^= ((command_counter as u16) & 0x3F) << 4_i32;
     }
 
     // Perform modulo-2 division, a bit at a time.
-    let mut bit_index = 6;
-    while bit_index > 0 {
+    let mut bit_index = 6_i32;
+    while bit_index > 0_i32 {
         if remainder & 0x200 != 0 {
-            remainder = (remainder << 1) ^ POLYNOMIAL;
+            remainder = (remainder << 1_i32) ^ POLYNOMIAL;
         } else {
-            remainder <<= 1;
+            remainder <<= 1_i32;
         }
-        bit_index -= 1;
+        bit_index -= 1_i32;
     }
 
     remainder & 0x3FF
