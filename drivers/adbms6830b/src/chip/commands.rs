@@ -52,7 +52,7 @@ impl CommandFrame {
     /// Converts a `CommandFrame` into bytes.
     pub const fn to_bytes(self) -> [u8; 4] {
         let code = self.command.code().into_bits();
-        let cmd0 = (code >> 8_i32) as u8 & 0x07;
+        let cmd0 = (code >> 8) as u8 & 0x07;
         let cmd1 = (code & 0xFF) as u8;
         [cmd0, cmd1, self.pec.pec0(), self.pec.pec1()]
     }

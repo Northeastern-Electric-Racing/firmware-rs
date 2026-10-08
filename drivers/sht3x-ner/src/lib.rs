@@ -130,11 +130,11 @@ fn crc8(data: [u8; 2]) -> u8 {
     for byte in data {
         crc ^= byte;
 
-        for _ in 0_i32..8_i32 {
+        for _ in 0..8 {
             if crc & 0x80 > 0 {
-                crc = (crc << 1_i32) ^ 0x31;
+                crc = (crc << 1) ^ 0x31;
             } else {
-                crc <<= 1_i32;
+                crc <<= 1;
             }
         }
     }
@@ -288,18 +288,18 @@ bitflags! {
     /// Status register
     pub struct Status: u16 {
         /// Alert pending status
-        const ALERT_PENDING         = 1 << 15_i32;
+        const ALERT_PENDING         = 1 << 15;
         /// Heater status
-        const HEATER                = 1 << 13_i32;
+        const HEATER                = 1 << 13;
         /// RH tracking alert
-        const RH_TRACKING_ALERT     = 1 << 11_i32;
+        const RH_TRACKING_ALERT     = 1 << 11;
         /// T tracking alert
-        const T_TRACKING_ALERT      = 1 << 10_i32;
+        const T_TRACKING_ALERT      = 1 << 10;
         /// System reset detected
-        const SYSTEM_RESET_DETECTED = 1 <<  4_i32;
+        const SYSTEM_RESET_DETECTED = 1 <<  4;
         /// Command status
-        const COMMAND               = 1 <<  1_i32;
+        const COMMAND               = 1 <<  1;
         /// Write data checksum status
-        const WRITE_DATA_CHECKSUM   = 1 <<  0_i32;
+        const WRITE_DATA_CHECKSUM   = 1 <<  0;
     }
 }

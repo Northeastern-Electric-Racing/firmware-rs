@@ -45,10 +45,10 @@ pub mod types {
         let numerator = microvolts - OFFSET_MICROVOLTS;
 
         // do the rounding
-        let code = if numerator >= 0_i32 {
-            (numerator + LSB_MICROVOLTS / 2_i32) / LSB_MICROVOLTS
+        let code = if numerator >= 0 {
+            (numerator + LSB_MICROVOLTS / 2) / LSB_MICROVOLTS
         } else {
-            (numerator - LSB_MICROVOLTS / 2_i32) / LSB_MICROVOLTS
+            (numerator - LSB_MICROVOLTS / 2) / LSB_MICROVOLTS
         };
 
         // Store the low 12 bits of the two's complement representation.
@@ -57,7 +57,7 @@ pub mod types {
 
     /// Converts a raw 12-bit two's complement VUV/VOV code back into a threshold in microvolts.
     const fn vuv_vov_to_microvolts(code: u16) -> i32 {
-        let signed = ((code << 4_i32) as i16) >> 4_i32; // turn the raw code into a signed i16
+        let signed = ((code << 4) as i16) >> 4; // turn the raw code into a signed i16
         signed as i32 * LSB_MICROVOLTS + OFFSET_MICROVOLTS
     }
 
