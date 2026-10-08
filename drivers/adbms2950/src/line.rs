@@ -220,8 +220,6 @@ impl<SPI: SpiDevice> Line<SPI> {
                 return Ok(());
             }
             if embassy_time::Instant::now() >= deadline {
-                #[cfg(feature = "defmt")]
-                defmt::warn!("ADBMS2950: Line: poll_until: conversion did not complete in time");
                 return Err(Error::Timeout);
             }
             embassy_time::Timer::after(embassy_time::Duration::from_millis(1)).await;
@@ -281,8 +279,6 @@ impl<SPI: SpiDevice> Line<SPI> {
                 return Ok(());
             }
             if embassy_time::Instant::now() >= deadline {
-                #[cfg(feature = "defmt")]
-                defmt::warn!("ADBMS2950: Line: wait_for_reference: REFUP never asserted");
                 return Err(Error::Timeout);
             }
             embassy_time::Timer::after(embassy_time::Duration::from_micros(500)).await;

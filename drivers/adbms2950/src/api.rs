@@ -187,14 +187,6 @@ impl<SPI: SpiDevice> Api<SPI> {
         if self.active == line {
             return;
         }
-
-        #[cfg(feature = "defmt")]
-        defmt::warn!(
-            "ADBMS2950: Api: set_active_line: switching from {} to {}",
-            self.active,
-            line
-        );
-
         self.active = line;
     }
 
@@ -260,15 +252,6 @@ impl<SPI: SpiDevice> Api<SPI> {
                 self.device.pec_success_count = self.device.pec_success_count.saturating_add(1);
                 self.device.reported_command_counter = Some(response.command_counter);
                 self.note_success();
-
-                if self.device.suspected_reset() {
-                    #[cfg(feature = "defmt")]
-                    defmt::warn!(
-                        "ADBMS2950: Api: read: device reported command counter 0 while we expected {}; it has reset and lost its configuration",
-                        self.device.expected_command_counter
-                    );
-                }
-
                 Ok(response.data)
             }
             Err(err) => {
@@ -461,8 +444,6 @@ impl<SPI: SpiDevice> Api<SPI> {
                 return Ok(());
             }
             if Instant::now() >= deadline {
-                #[cfg(feature = "defmt")]
-                defmt::warn!("ADBMS2950: Api: autoconvert: conversion did not complete in time");
                 return Err(Error::Timeout);
             }
             embassy_time::Timer::after(Duration::from_millis(1)).await;
