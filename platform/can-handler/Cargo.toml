@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 
-embassy-futures = "0.1.2"
 embassy-sync.workspace = true
 
 defmt.workspace = true
