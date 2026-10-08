@@ -14,31 +14,31 @@ mod sealed {
 
 pub trait CanRepr: sealed::Sealed + Copy {
     type Bytes: AsRef<[u8]>;
-    fn to_le_bytes(self) -> Self::Bytes;
+    fn to_be_bytes(self) -> Self::Bytes;
 }
 
 impl CanRepr for u8 {
     type Bytes = [u8; 1];
-    fn to_le_bytes(self) -> Self::Bytes {
-        u8::to_le_bytes(self)
+    fn to_be_bytes(self) -> Self::Bytes {
+        u8::to_be_bytes(self)
     }
 }
 impl CanRepr for u16 {
     type Bytes = [u8; 2];
-    fn to_le_bytes(self) -> Self::Bytes {
-        u16::to_le_bytes(self)
+    fn to_be_bytes(self) -> Self::Bytes {
+        u16::to_be_bytes(self)
     }
 }
 impl CanRepr for u32 {
     type Bytes = [u8; 4];
-    fn to_le_bytes(self) -> Self::Bytes {
-        u32::to_le_bytes(self)
+    fn to_be_bytes(self) -> Self::Bytes {
+        u32::to_be_bytes(self)
     }
 }
 impl CanRepr for u64 {
     type Bytes = [u8; 8];
-    fn to_le_bytes(self) -> Self::Bytes {
-        u64::to_le_bytes(self)
+    fn to_be_bytes(self) -> Self::Bytes {
+        u64::to_be_bytes(self)
     }
 }
 
@@ -65,7 +65,12 @@ pub trait ToCanFrame: Sized + Into<Self::Repr> {
     );
 
     fn to_can_frame<F: Frame>(self) -> F {
-        let bytes = self.into().to_le_bytes();
+        // Default assoc consts are only evaluated when referenced, so these
+        // force the compile-time bounds check
+        let _: () = Self::CHECK_BITS_FIT;
+        let _: () = Self::CHECK_LEN;
+
+        let bytes = self.into().to_be_bytes();
         // this is guarranteed in bounds by the `CHECK_BITS_FIT`
         // SAFETY: this is guarranteed to be within the size of a CAN frame by `CHECK_LEN`
         unsafe { F::new(Self::ID, &bytes.as_ref()[..Self::LEN]).unwrap_unchecked() }
@@ -79,17 +84,12 @@ pub trait ToCanFrame: Sized + Into<Self::Repr> {
 /// failing; use the `try_*` variants when you need to detect the condition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OutOfRange {
-    /// The field (snake_case accessor name) that rejected the value.
+    /// The field that rejected the value.
     pub field: &'static str,
 }
 
 /// Scaled fixed-point conversion helpers used by the generated bitfields.
 ///
-/// Every generated numeric field exposes the *physical* value as an `f32`
-/// (the Rust equivalent of the C `float` the definitions use), while the
-/// bitfield stores a raw `N`-bit integer. These `const` functions apply the
-/// divisor / multiplier from the JSON `formatter` spec and, for signed
-/// fields, sign-extend the stored bits.
 ///
 /// They are referenced by the `#[bits(N, from = .., into = ..)]` attributes
 /// that `generate_all_messages!` emits, e.g.
