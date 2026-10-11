@@ -8,7 +8,7 @@ use embedded_hal_async::spi::SpiDevice;
 use crate::chip::commands::{self, Command, CommandFrame};
 use crate::chip::registers::{ReadableGroup, WritableGroup};
 use crate::docs;
-use crate::line::{conversion_times, ChipResponse, Error, Line};
+use crate::line::{conversion_times, ChipResponse, Error, Line, RawGroup};
 use crate::chip::registers::{
     config_a::ConfigA,
     config_b::ConfigB,
@@ -156,6 +156,16 @@ pub mod writeables {
 pub struct Responses<G, E, const N: usize> {
     chips: [Option<ChipResponse<G>>; N],
     errors: [Option<Error<E>>; 2],
+}
+
+impl<G, E, const N: usize> Responses<G, E, N> {
+    /// PRIVATE! Converts every chip's data with `f`.
+    fn map<H>(self, mut f: impl FnMut(G) -> H) -> Responses<H, E, N> {
+        Responses {
+            chips: self.chips.map(|chip| chip.map(|chip| chip.map(&mut f))),
+            errors: self.errors,
+        }
+    }
 }
 
 impl<G: Copy, E, const N: usize> Responses<G, E, N> {
@@ -487,17 +497,18 @@ impl<SPI: SpiDevice, const N: usize> Api<SPI, N> {
     }
 
     /// PRIVATE! Reads a register group from every chip on one line.
-    async fn read_line<G: ReadableGroup>(
+    async fn read_line(
         &mut self,
         line: LineId,
-    ) -> Result<crate::line::Responses<G, N>, Error<SPI::Error>> {
+        frame: CommandFrame,
+    ) -> Result<crate::line::Responses<RawGroup, N>, Error<SPI::Error>> {
         let count = self.count(line);
         if count == 0 {
             return Ok(crate::line::Responses::empty());
         }
 
-        self.note(line, G::READ_COMMAND);
-        let result = self.line_mut(line).read::<G>(count).await;
+        self.note(line, frame);
+        let result = self.line_mut(line).read_raw(frame, count).await;
 
         if let Err(err) = &result {
             match line {
@@ -522,8 +533,13 @@ impl<SPI: SpiDevice, const N: usize> Api<SPI, N> {
 
     /// Reads a register group from every chip.
     pub async fn read<G: ReadableGroup>(&mut self) -> Responses<G, SPI::Error, N> {
-        let line_a = self.read_line::<G>(LineId::A).await;
-        let line_b = self.read_line::<G>(LineId::B).await;
+        self.read_raw(G::READ_COMMAND).await.map(G::from_bytes)
+    }
+
+    /// PRIVATE! Non-generic body of `read()`. Sends `frame` and returns the undecoded group bytes.
+    async fn read_raw(&mut self, frame: CommandFrame) -> Responses<RawGroup, SPI::Error, N> {
+        let line_a = self.read_line(LineId::A, frame).await;
+        let line_b = self.read_line(LineId::B, frame).await;
 
         let mut chips = [None; N];
 
@@ -587,20 +603,25 @@ impl<SPI: SpiDevice, const N: usize> Api<SPI, N> {
     /// 
     /// PRIVATE! This lets you pass in any `WriteableGroup` so it's not meant to be used outside of this mod.
     async fn private_write<G: WritableGroup>(&mut self, groups: &[G; N]) -> Result<(), Error<SPI::Error>> {
+        self.private_write_raw(G::WRITE_COMMAND, &groups.map(G::to_bytes)).await
+    }
+
+    /// PRIVATE! Non-generic body of `private_write()`. Sends `frame` with one block of group bytes per chip.
+    async fn private_write_raw(&mut self, frame: CommandFrame, groups: &[RawGroup; N]) -> Result<(), Error<SPI::Error>> {
         let (count_a, count_b) = (self.count(LineId::A), self.count(LineId::B));
 
         let line_a = if count_a > 0 {
-            self.note(LineId::A, G::WRITE_COMMAND);
-            self.line_a.write(&groups[..count_a]).await
+            self.note(LineId::A, frame);
+            self.line_a.write_raw(frame, &groups[..count_a]).await
         } else {
             Ok(())
         };
 
         let line_b = if count_b > 0 {
             // Line B reaches its chips in reverse logical order.
-            let reversed: [G; N] = core::array::from_fn(|i| groups[N - 1 - i]);
-            self.note(LineId::B, G::WRITE_COMMAND);
-            self.line_b.write(&reversed[..count_b]).await
+            let reversed: [RawGroup; N] = core::array::from_fn(|i| groups[N - 1 - i]);
+            self.note(LineId::B, frame);
+            self.line_b.write_raw(frame, &reversed[..count_b]).await
         } else {
             Ok(())
         };
