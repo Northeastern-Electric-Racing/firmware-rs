@@ -28,7 +28,7 @@ can() {
     # Build for this computer, independently of the application's Cargo config.
     (
         cd -- "$_CAN_FLASH_TOOL_DIR" || exit 1
-        cargo build --quiet --locked --bin can \
+        cargo build --locked --bin can \
             --target "$can_flash_target" \
             --target-dir "$_CAN_FLASH_TOOL_DIR/target"
     ) || return $?
