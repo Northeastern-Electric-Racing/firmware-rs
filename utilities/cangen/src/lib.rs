@@ -88,6 +88,13 @@ pub struct OutOfRange {
     pub field: &'static str,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameError {
+    RemoteFrame,
+    WrongId,
+    TooShort { expected: usize, got: usize },
+}
+
 /// Scaled fixed-point conversion helpers used by the generated bitfields.
 ///
 ///
