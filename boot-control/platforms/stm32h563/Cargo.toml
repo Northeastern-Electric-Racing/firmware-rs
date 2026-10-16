@@ -1,9 +1,9 @@
 [package]
-name = "stm32h563-bootloader-app"
+name = "boot-control-stm32h563"
 version = "0.1.0"
 edition = "2024"
 publish = false
-links = "stm32h563_bootloader_app"
+links = "boot_control"
 
 [dependencies]
 cortex-m = "0.7"
