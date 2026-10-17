@@ -54,14 +54,14 @@ pub trait ToCanFrame: Sized + Into<Self::Repr> {
     /// a hack to ensure that the `Repr` is specified correctly
     const CHECK_BITS_FIT: () = assert!(
         Self::LEN <= core::mem::size_of::<Self::Repr>(),
-        "BITS exceeds the backing integer's width"
+        "LEN exceeds Repr"
     );
 
     #[doc(hidden)]
     /// a hack to ensure that the `Repr` and `LEN` are 8 bytes or less (CAN 2.0)
     const CHECK_LEN: () = assert!(
         Self::LEN <= 8 && core::mem::size_of::<Self::Repr>() <= 8,
-        "BITS exceeds the backing integer's width"
+        "LEN exceeds the 8-byte CAN 2.0 limit"
     );
 
     fn to_can_frame<F: Frame>(self) -> F {
@@ -74,6 +74,20 @@ pub trait ToCanFrame: Sized + Into<Self::Repr> {
         // this is guarranteed in bounds by the `CHECK_BITS_FIT`
         // SAFETY: this is guarranteed to be within the size of a CAN frame by `CHECK_LEN`
         unsafe { F::new(Self::ID, &bytes.as_ref()[..Self::LEN]).unwrap_unchecked() }
+    }
+}
+
+pub trait FromCanFrame: Sized + From<u64> {
+    const ID: Id;
+    const LEN: usize;
+
+    fn from_can_frame<F: Frame>(frame: &F) -> Option<Self> {
+        if frame.id() != Self::ID || frame.data().len() != Self::LEN {
+            return None;
+        }
+        let mut buf = [0u8; 8];
+        buf[..Self::LEN].copy_from_slice(frame.data());
+        Some(Self::from(u64::from_be_bytes(buf)))
     }
 }
 

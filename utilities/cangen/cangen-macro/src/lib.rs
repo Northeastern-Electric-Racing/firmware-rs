@@ -408,47 +408,10 @@ fn build_struct(msg: CANMsg) -> proc_macro2::TokenStream {
         }
     };
 
-    // Decode from a received CAN frame.
-    let from_frame = quote! {
-        impl #struct_name {
-            /// Parse this message from a CAN frame, checking that it is a data
-            /// frame with the right ID and enough payload bytes.
-            pub fn try_from_frame<F: ::embedded_can::Frame>(
-                frame: &F,
-            ) -> ::core::result::Result<Self, FrameError> {
-                if frame.is_remote_frame() {
-                    return ::core::result::Result::Err(FrameError::RemoteFrame);
-                }
-                if frame.id() != <Self as ToCanFrame>::ID {
-                    return ::core::result::Result::Err(FrameError::WrongId);
-                }
-
-                let data = frame.data();
-                if data.len() < #min_size {
-                    return ::core::result::Result::Err(FrameError::TooShort {
-                        expected: #min_size,
-                        got: data.len(),
-                    });
-                }
-
-                // The struct is packed MSB-first, so payload byte 0 is the most
-                // significant byte of the backing integer. Left-align the payload
-                // in a zeroed buffer; any unused trailing bytes land in the
-                // `_reservedN` padding bits.
-                let mut buf = [0u8; ::core::mem::size_of::<#ts>()];
-                let n = ::core::cmp::min(data.len(), buf.len());
-                buf[..n].copy_from_slice(&data[..n]);
-
-                ::core::result::Result::Ok(Self::from_bits(<#ts>::from_be_bytes(buf)))
-            }
-        }
-    };
-
     quote! {
         #tr
         #expanded
         #checked
-        #from_frame
         #(#helper_items)*
     }
 }
