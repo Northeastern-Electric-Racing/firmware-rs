@@ -1,0 +1,22 @@
+[package]
+name = "nereth"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+embassy-stm32.workspace = true
+embassy-net.workspace = true
+embassy-executor.workspace = true
+embassy-sync.workspace = true
+static_cell.workspace = true
+defmt.workspace = true
+
+getrandom = { version = "0.2", default-features = false, features = ["custom"] }
+zenoh-nostd = { git = "https://github.com/Northeastern-Electric-Racing/zenoh-nostd", rev = "9c7641729aa22e6ff15b6e633151f7f37e863f12", features = ["embedded", "defmt"] }
+zenoh-embassy = { git = "https://github.com/Northeastern-Electric-Racing/zenoh-nostd", rev = "9c7641729aa22e6ff15b6e633151f7f37e863f12" }
+
+micropb = { version = "0.6.0", features = ["container-heapless-0-9"] }
+heapless = "0.9"
+
+[build-dependencies]
+micropb-gen = "0.6.0"
