@@ -31,59 +31,44 @@ impl_can_repr!(u8, u16, u32, u64);
 
 /// Creates a CAN frame
 /// All the users have to do is specify `Repr`, `ID`, and `LEN`
-pub trait ToCanFrame: Sized + Into<Self::Repr> {
+/// Describes a CAN message's identity and layout. Implemented once per message.
+pub trait CanMessage: Sized {
     type Repr: CanRepr;
 
     const ID: Id;
     const LEN: usize;
 
     #[doc(hidden)]
-    /// a hack to ensure that the `Repr` is specified correctly
-    const CHECK_BITS_FIT: () = assert!(
-        Self::LEN <= core::mem::size_of::<Self::Repr>(),
-        "LEN exceeds Repr"
-    );
+    const CHECK: () = {
+        assert!(
+            Self::LEN <= core::mem::size_of::<Self::Repr>(),
+            "LEN exceeds Repr"
+        );
+        assert!(Self::LEN <= 8, "LEN exceeds the 8-byte CAN 2.0 limit");
+    };
+}
 
-    #[doc(hidden)]
-    /// a hack to ensure that the `Repr` and `LEN` are 8 bytes or less (CAN 2.0)
-    const CHECK_LEN: () = assert!(
-        Self::LEN <= 8 && core::mem::size_of::<Self::Repr>() <= 8,
-        "LEN exceeds the 8-byte CAN 2.0 limit"
-    );
-
+pub trait ToCanFrame: CanMessage + Into<<Self as CanMessage>::Repr> {
     fn to_can_frame<F: Frame>(self) -> F {
-        let _: () = Self::CHECK_BITS_FIT;
-        let _: () = Self::CHECK_LEN;
+        let _: () = Self::CHECK;
 
-        let repr: Self::Repr = self.into();
+        let repr: <Self as CanMessage>::Repr = self.into();
         let bytes = repr.to_be_bytes();
-        F::new(Self::ID, &bytes.as_ref()[..Self::LEN]).expect("frame construction failed")
+        F::new(Self::ID, &bytes.as_ref()[..Self::LEN])
+            .expect("frame construction failed")
     }
 }
 
-pub trait FromCanFrame: Sized + From<Self::Repr> {
-    type Repr: CanRepr;
-
-    const ID: Id;
-    const LEN: usize;
-
-    #[doc(hidden)]
-    /// a hack to ensure that the `Repr` is specified correctly
-    const CHECK_BITS_FIT: () = assert!(
-        Self::LEN <= core::mem::size_of::<Self::Repr>(),
-        "LEN exceeds Repr"
-    );
-
+pub trait FromCanFrame: CanMessage + From<<Self as CanMessage>::Repr> {
     fn from_can_frame<F: Frame>(frame: &F) -> Option<Self> {
-        let _: () = Self::CHECK_BITS_FIT;
+        let _: () = Self::CHECK;
 
         if frame.is_remote_frame() || frame.id() != Self::ID || frame.data().len() != Self::LEN {
             return None;
         }
-        let mut bytes = <<Self as FromCanFrame>::Repr as CanRepr>::Bytes::default();
+        let mut bytes = <<Self as CanMessage>::Repr as CanRepr>::Bytes::default();
         bytes.as_mut()[..Self::LEN].copy_from_slice(frame.data());
-        let repr = <<Self as FromCanFrame>::Repr as CanRepr>::from_be_bytes(bytes);
-        Some(Self::from(repr))
+        Some(Self::from(<<Self as CanMessage>::Repr as CanRepr>::from_be_bytes(bytes)))
     }
 }
 

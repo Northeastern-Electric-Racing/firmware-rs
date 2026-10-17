@@ -394,17 +394,13 @@ fn build_struct(msg: CANMsg) -> proc_macro2::TokenStream {
     };
 
     let tr = quote! {
-        impl ToCanFrame for #struct_name {
+        impl CanMessage for WheelButtons {
             type Repr  = #ts;
             const LEN: usize = #min_size;
             const ID: Id = #id_decl;
         }
-
-        impl FromCanFrame for #struct_name {
-            type Repr  = #ts;
-            const LEN: usize = #min_size;
-            const ID: Id = #id_decl;
-        }
+        impl ToCanFrame for WheelButtons {}
+        impl FromCanFrame for WheelButtons {}
     };
 
     // Range-validating accessors for the saturating (scaled `f32`) fields.
