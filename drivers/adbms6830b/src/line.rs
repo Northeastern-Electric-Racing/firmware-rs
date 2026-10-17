@@ -83,7 +83,23 @@ impl<G: Copy> ChipResponse<G> {
     }
 }
 
-impl<G: ReadableGroup> ChipResponse<G> {
+impl<G> ChipResponse<G> {
+    /// CRATE PRIVATE! Converts the data with `f`, keeping the command counter and PEC status.
+    pub(crate) fn map<H>(self, f: impl FnOnce(G) -> H) -> ChipResponse<H> {
+        ChipResponse {
+            data: f(self.data),
+            command_counter: self.command_counter,
+            pec: self.pec,
+        }
+    }
+}
+
+/// CRATE PRIVATE! A register group's undecoded wire bytes.
+///
+/// The read path works on these so it only gets compiled once, instead of once per register group.
+pub(crate) type RawGroup = [u8; GROUP_BYTES];
+
+impl ChipResponse<RawGroup> {
     /// PRIVATE! Decodes one device's block off the wire (`GROUP_BYTES` of data, then PEC0/PEC1).
     fn from_block(block: &[u8; BLOCK_BYTES]) -> Self {
         let mut data = [0u8; GROUP_BYTES];
@@ -91,7 +107,7 @@ impl<G: ReadableGroup> ChipResponse<G> {
         let pec = DataPecRx::from_bytes([block[GROUP_BYTES], block[GROUP_BYTES + 1]]);
 
         Self {
-            data: G::from_bytes(data),
+            data,
             command_counter: pec.ccnt(),
             pec: if pec.verify(&data) {
                 PecStatus::Success
@@ -104,7 +120,7 @@ impl<G: ReadableGroup> ChipResponse<G> {
     /// PRIVATE! Filler for slots that were never read.
     fn blank() -> Self {
         Self {
-            data: G::from_bytes([0; GROUP_BYTES]),
+            data: [0; GROUP_BYTES],
             command_counter: 0,
             pec: PecStatus::Failed,
         }
@@ -133,7 +149,7 @@ pub struct Responses<G, const N: usize> {
     used: usize,
 }
 
-impl<G: ReadableGroup, const N: usize> Responses<G, N> {
+impl<const N: usize> Responses<RawGroup, N> {
     /// PRIVATE! Decodes the first `used` blocks that came back off from SPI.
     fn from_blocks(blocks: &[[u8; BLOCK_BYTES]; N], used: usize) -> Self {
         Self {
@@ -158,6 +174,14 @@ impl<G: ReadableGroup, const N: usize> Responses<G, N> {
 }
 
 impl<G, const N: usize> Responses<G, N> {
+    /// CRATE PRIVATE! Converts every device's data with `f`.
+    pub(crate) fn map<H>(self, mut f: impl FnMut(G) -> H) -> Responses<H, N> {
+        Responses {
+            chips: self.chips.map(|chip| chip.map(&mut f)),
+            used: self.used,
+        }
+    }
+
     /// Whether every device covered by this response passed its PEC check.
     pub fn all_ok(&self) -> bool {
         self.chips[..self.used]
@@ -262,6 +286,15 @@ impl<SPI: SpiDevice, const N: usize> Line<SPI, N> {
         &mut self,
         count: usize,
     ) -> Result<Responses<G, N>, Error<SPI::Error>> {
+        Ok(self.read_raw(G::READ_COMMAND, count).await?.map(G::from_bytes))
+    }
+
+    /// CRATE PRIVATE! Non-generic body of `read()`. Sends `frame` and returns the undecoded group bytes.
+    pub(crate) async fn read_raw(
+        &mut self,
+        frame: CommandFrame,
+        count: usize,
+    ) -> Result<Responses<RawGroup, N>, Error<SPI::Error>> {
         if count > N {
             return Err(Error::TooManyDevices);
         }
@@ -269,7 +302,7 @@ impl<SPI: SpiDevice, const N: usize> Line<SPI, N> {
         let mut blocks = [[0u8; BLOCK_BYTES]; N];
         self.transact(
             count,
-            G::READ_COMMAND,
+            frame,
             Some(Operation::Read(
                 &mut blocks.as_flattened_mut()[..count * BLOCK_BYTES],
             )),
@@ -281,6 +314,19 @@ impl<SPI: SpiDevice, const N: usize> Line<SPI, N> {
 
     /// Writes one register group per device.
     pub async fn write<G: WritableGroup>(&mut self, groups: &[G]) -> Result<(), Error<SPI::Error>> {
+        if groups.len() > N {
+            return Err(Error::TooManyDevices);
+        }
+
+        let mut raw = [[0u8; GROUP_BYTES]; N];
+        for (raw, group) in raw.iter_mut().zip(groups) {
+            *raw = group.to_bytes();
+        }
+        self.write_raw(G::WRITE_COMMAND, &raw[..groups.len()]).await
+    }
+
+    /// CRATE PRIVATE! Non-generic body of `write()`. Sends `frame` with one block of group bytes per device.
+    pub(crate) async fn write_raw(&mut self, frame: CommandFrame, groups: &[RawGroup]) -> Result<(), Error<SPI::Error>> {
         let count = groups.len();
         if count > N {
             return Err(Error::TooManyDevices);
@@ -288,18 +334,17 @@ impl<SPI: SpiDevice, const N: usize> Line<SPI, N> {
 
         // The first block on the wire ends up in the furthest device so we need to reverse the payload
         let mut blocks = [[0u8; BLOCK_BYTES]; N];
-        for (i, group) in groups.iter().enumerate() {
+        for (i, data) in groups.iter().enumerate() {
             let block = &mut blocks[count - 1 - i];
-            let data = group.to_bytes();
-            block[..GROUP_BYTES].copy_from_slice(&data);
-            let pec = DataPecTx::new(&data);
+            block[..GROUP_BYTES].copy_from_slice(data);
+            let pec = DataPecTx::new(data);
             block[GROUP_BYTES] = pec.pec0();
             block[GROUP_BYTES + 1] = pec.pec1();
         }
 
         self.transact(
             count,
-            G::WRITE_COMMAND,
+            frame,
             Some(Operation::Write(
                 &blocks.as_flattened()[..count * BLOCK_BYTES],
             )),
