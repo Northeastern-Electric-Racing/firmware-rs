@@ -233,7 +233,7 @@ pub mod conv {
     );
 }
 
-impl ToCanFrame for ExampleDoNotUse {
+impl CanMessage for ExampleDoNotUse {
     type Repr = u64;
     const ID: Id = Id::Standard(StandardId::new(0x00).unwrap());
     const LEN: usize = 6;
