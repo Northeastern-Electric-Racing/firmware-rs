@@ -399,6 +399,12 @@ fn build_struct(msg: CANMsg) -> proc_macro2::TokenStream {
             const LEN: usize = #min_size;
             const ID: Id = #id_decl;
         }
+
+        impl FromCanFrame for #struct_name {
+            type Repr  = #ts;
+            const LEN: usize = #min_size;
+            const ID: Id = #id_decl;
+        }
     };
 
     // Range-validating accessors for the saturating (scaled `f32`) fields.
