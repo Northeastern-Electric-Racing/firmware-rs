@@ -2,8 +2,8 @@
 
 use bitfield_struct::bitfield;
 use cangen_macro::generate_all_messages;
-use embedded_can::{ExtendedId, Frame, StandardId};
-pub use embedded_can::Id;
+use embedded_can::{ExtendedId, StandardId};
+pub use embedded_can::{Id, Frame};
 
 mod sealed {
     pub trait Sealed {}
