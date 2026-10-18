@@ -55,6 +55,7 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
         .collect();
 
     let names: Vec<Ident> = msgs.iter().map(struct_ident).collect();
+    let id_docs: Vec<String> = msgs.iter().map(id_doc).collect();
     let decls: Vec<proc_macro2::TokenStream> = msgs.into_iter().map(build_struct).collect();
 
     // combine the structs together, plus the `Msg` enum for matching
@@ -64,7 +65,7 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
         /// Every known CAN message, decoded.
         #[derive(Clone, Copy)]
         pub enum Msg {
-            #( #names(#names), )*
+            #( #[doc = #id_docs] #names(#names), )*
         }
 
         impl Msg {
@@ -111,6 +112,15 @@ fn int_for(bits: usize) -> proc_macro2::TokenStream {
 fn conv_path(name: &str) -> proc_macro2::TokenStream {
     let id = Ident::new(name, proc_macro2::Span::call_site());
     quote! { conv::#id }
+}
+
+fn id_doc(msg: &CANMsg) -> String {
+    let id = u32::from_str_radix(msg.id.trim_start_matches("0x"), 16).unwrap();
+    if msg.is_ext.unwrap_or(false) {
+        format!(" CAN ID: `0x{id:08X}` (extended, 29-bit)")
+    } else {
+        format!(" CAN ID: `0x{id:03X}` (standard, 11-bit)")
+    }
 }
 
 /// Build `#[doc = ..]` attributes for a field from its matched `NetField`.
@@ -412,7 +422,9 @@ fn build_struct(msg: CANMsg) -> proc_macro2::TokenStream {
     let ts = uint_for(bit_cnt);
 
     // Generate the final output Rust code
+    let id_doc_str = id_doc(&msg);
     let expanded = quote! {
+        #[doc = #id_doc_str]
         #[bitfield(#ts, order = Msb)]
         pub struct #struct_name {
             #(#field_declarations),*
