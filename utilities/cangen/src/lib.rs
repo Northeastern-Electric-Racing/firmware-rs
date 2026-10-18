@@ -73,22 +73,6 @@ pub trait FromCanFrame: CanMessage + From<<Self as CanMessage>::Repr> {
     }
 }
 
-#[macro_export]
-macro_rules! can_match {
-    ($rx:expr, { $( $msg:ty => |$m:ident| $body:expr ),* $(,)? }) => {{
-        let __frame = $rx.receive().await;
-        let __f = &__frame;
-        let __id = $crate::Frame::id(__f);
-        $(
-            if __id == <$msg as $crate::CanMessage>::ID {
-                if let Some($m) = <$msg as $crate::FromCanFrame>::from_can_frame(__f) {
-                    $body;
-                }
-            } else
-        )* { }
-    }};
-}
-
 /// Error returned by the generated `try_with_*` / `try_set_*` accessors when a
 /// physical value can't be represented in a scaled field's bit width.
 ///

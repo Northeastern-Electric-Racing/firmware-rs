@@ -28,7 +28,7 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
         .map(|__entry| __entry.path())
         .filter(|__path| __path.is_file() && __path.extension().is_some_and(|ext| ext == "json"))
         .filter_map(|__path| {
-            let __data = match fs::read_to_string(__path) {
+            let __data = match fs::read_to_string(&__path) {
                 Ok(__data) => __data,
                 Err(__error) => {
                     eprintln!("Could not read file: {__error}");
@@ -39,23 +39,48 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
             // treat deserialization failures as critical
             Some(
                 serde_json::from_str::<Vec<OdysseyMsg>>(&__data)
-                    .expect("Error deserializing {__path}"),
+                    .unwrap_or_else(|e| panic!("Error deserializing {}: {e}", __path.display())),
             )
         })
         .flatten()
         .collect();
 
-    let decls: Vec<proc_macro2::TokenStream> = __json
+    // keep only CAN messages
+    let msgs: Vec<CANMsg> = __json
         .into_iter()
         .filter_map(|f| match f {
-            OdysseyMsg::Can(canmsg) => Some(build_struct(canmsg)),
+            OdysseyMsg::Can(canmsg) => Some(canmsg),
             OdysseyMsg::Meta(_meta_msg) => None,
         })
         .collect();
 
-    // combine the structs together
+    let names: Vec<Ident> = msgs.iter().map(struct_ident).collect();
+    let decls: Vec<proc_macro2::TokenStream> = msgs.into_iter().map(build_struct).collect();
+
+    // combine the structs together, plus the `Msg` enum for matching
     let res = quote! {
         #( #decls )*
+
+        /// Every known CAN message, decoded.
+        #[derive(Clone, Copy)]
+        pub enum Msg {
+            #( #names(#names), )*
+        }
+
+        impl Msg {
+            /// Decode a frame into the message matching its ID.
+            /// `None` for unknown IDs or malformed frames.
+            pub fn decode<F: Frame>(frame: &F) -> Option<Self> {
+                let id = frame.id();
+                #(
+                    if id == <#names as CanMessage>::ID {
+                        return <#names as FromCanFrame>::from_can_frame(frame)
+                            .map(Msg::#names);
+                    }
+                )*
+                None
+            }
+        }
     };
 
     TokenStream::from(res)
@@ -318,6 +343,13 @@ fn field_tokens(
     }
 }
 
+fn struct_ident(msg: &CANMsg) -> Ident {
+    Ident::new(
+        &AsPascalCase(msg.desc.to_lowercase().replace(' ', "_")).to_string(),
+        proc_macro2::Span::call_site(),
+    )
+}
+
 /// CANMsg -> bitfield and associated Impls
 fn build_struct(msg: CANMsg) -> proc_macro2::TokenStream {
     // the total count of bits sent, including parse=false bits
@@ -326,13 +358,7 @@ fn build_struct(msg: CANMsg) -> proc_macro2::TokenStream {
     // the minimum number of bytes to hold the message (effectively the DLC)
     let min_size = quote! { #min_size_raw };
 
-    let struct_name = Ident::new(
-        &format!(
-            "{}",
-            AsPascalCase(msg.desc.clone().to_lowercase().replace(' ', "_"))
-        ),
-        proc_macro2::Span::call_site(),
-    );
+    let struct_name = struct_ident(&msg);
 
     let id_int = u32::from_str_radix(msg.id.clone().trim_start_matches("0x"), 16).unwrap();
     let ext_ident = msg.is_ext.unwrap_or(false);
