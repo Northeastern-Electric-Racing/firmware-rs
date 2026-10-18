@@ -3,7 +3,7 @@
 use bitfield_struct::bitfield;
 use cangen_macro::generate_all_messages;
 use embedded_can::{ExtendedId, StandardId};
-pub use embedded_can::{Id, Frame};
+pub use embedded_can::{Frame, Id};
 
 mod sealed {
     pub trait Sealed {}
@@ -55,8 +55,7 @@ pub trait ToCanFrame: CanMessage + Into<<Self as CanMessage>::Repr> {
 
         let repr: <Self as CanMessage>::Repr = self.into();
         let bytes = repr.to_be_bytes();
-        F::new(Self::ID, &bytes.as_ref()[..Self::LEN])
-            .expect("frame construction failed")
+        F::new(Self::ID, &bytes.as_ref()[..Self::LEN]).expect("frame construction failed")
     }
 }
 
@@ -69,7 +68,9 @@ pub trait FromCanFrame: CanMessage + From<<Self as CanMessage>::Repr> {
         }
         let mut bytes = <<Self as CanMessage>::Repr as CanRepr>::Bytes::default();
         bytes.as_mut()[..Self::LEN].copy_from_slice(frame.data());
-        Some(Self::from(<<Self as CanMessage>::Repr as CanRepr>::from_be_bytes(bytes)))
+        Some(Self::from(
+            <<Self as CanMessage>::Repr as CanRepr>::from_be_bytes(bytes),
+        ))
     }
 }
 
