@@ -61,31 +61,30 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
     let msgs = load_msgs();
 
     let names: Vec<Ident> = msgs.iter().map(struct_ident).collect();
-    // computed before `build_struct` consumes `msgs`
     let layouts: Vec<proc_macro2::TokenStream> =
         msgs.iter().map(|m| doc_lines(&layout_doc(m))).collect();
 
-    // one match arm per message for `Msg::decode_raw`
-    let arms: Vec<proc_macro2::TokenStream> = msgs
+    let (layout_arms, build_arms): (Vec<_>, Vec<_>) = msgs
         .iter()
         .map(|m| {
             let name = struct_ident(m);
             let id = u32::from_str_radix(m.id.trim_start_matches("0x"), 16).unwrap();
             let ext = m.is_ext.unwrap_or(false);
-            quote! {
-                (#ext, #id) => {
-                    let _: () = <#name as CanMessage>::CHECK;
-                    Msg::#name(#name::from(
-                        conv::read_be(
-                            data,
-                            <#name as CanMessage>::LEN,
-                            ::core::mem::size_of::<<#name as CanMessage>::Repr>(),
-                        )? as <#name as CanMessage>::Repr
-                    ))
-                }
+            let layout = quote! {
+            (#ext, #id) => {
+                let _: () = <#name as CanMessage>::CHECK;
+                (
+                    <#name as CanMessage>::LEN,
+                    ::core::mem::size_of::<<#name as CanMessage>::Repr>(),
+                )
             }
+        };
+            let build = quote! {
+            (#ext, #id) => Msg::#name(#name::from_bits(raw as <#name as CanMessage>::Repr)),
+        };
+            (layout, build)
         })
-        .collect();
+        .unzip();
 
     let decls: Vec<proc_macro2::TokenStream> = msgs.into_iter().map(build_struct).collect();
 
@@ -113,8 +112,16 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
                     Id::Standard(s) => (false, s.as_raw() as u32),
                     Id::Extended(e) => (true, e.as_raw()),
                 };
+                let (len, repr_bytes) = match key {
+                    #( #layout_arms )*
+                    _ => return None,
+                };
+                let raw = match conv::read_be(data, len, repr_bytes) {
+                    Some(raw) => raw,
+                    None => return None,
+                };
                 Some(match key {
-                    #( #arms )*
+                    #( #build_arms )*
                     _ => return None,
                 })
             }
