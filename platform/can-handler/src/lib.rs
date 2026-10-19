@@ -62,7 +62,7 @@ use embassy_stm32::can::filter::{
 use embassy_stm32::can::{CanConfigurator, CanRx, CanTx, Frame, Properties};
 use embassy_sync::channel::{DynamicReceiver, DynamicSender, TrySendError};
 use embassy_time::Timer;
-use embedded_can::{ExtendedId, Id, StandardId};
+use embedded_can::Id;
 
 use heapless::Vec;
 
@@ -168,10 +168,7 @@ impl NerCan {
                 match filter.id2 {
                     Some(id2) => {
                         if let Id::Standard(id2) = id2 {
-                            std.filter = DedicatedDual(
-                                id1,
-                                id2,
-                            );
+                            std.filter = DedicatedDual(id1, id2);
                         } else {
                             panic!("Provided extended ID message to id2");
                         }
@@ -211,10 +208,7 @@ impl NerCan {
                 match filter.id2 {
                     Some(id2) => {
                         if let Id::Extended(id2) = id2 {
-                            ext.filter = DedicatedDual(
-                                id1,
-                                id2,
-                            );
+                            ext.filter = DedicatedDual(id1, id2);
                         } else {
                             panic!("Provided standard ID message to id2");
                         }
