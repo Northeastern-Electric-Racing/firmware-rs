@@ -94,9 +94,9 @@ pub struct StdFilter {
     /// Message RAM slot this filter occupies.
     pub slot: StandardFilterSlot,
     /// First id to match.
-    pub id1: u16,
+    pub id1: StandardId,
     /// Optional second id to match.
-    pub id2: Option<u16>,
+    pub id2: Option<StandardId>,
 }
 
 /// An extended (29-bit) CAN filter, declared independently of the peripheral.
@@ -108,9 +108,9 @@ pub struct ExtFilter {
     /// Message RAM slot this filter occupies.
     pub slot: ExtendedFilterSlot,
     /// First id to match.
-    pub id1: u32,
+    pub id1: ExtendedId,
     /// Optional second id to match.
-    pub id2: Option<u32>,
+    pub id2: Option<ExtendedId>,
 }
 
 pub struct NerCan {
@@ -167,12 +167,12 @@ impl NerCan {
             match filter.id2 {
                 Some(id2) => {
                     std.filter = DedicatedDual(
-                        StandardId::new(filter.id1).unwrap(),
-                        StandardId::new(id2).unwrap(),
+                        filter.id1,
+                        id2,
                     );
                 }
                 None => {
-                    std.filter = DedicatedSingle(StandardId::new(filter.id1).unwrap());
+                    std.filter = DedicatedSingle(filter.id1);
                 }
             }
             std.action = Action::StoreInFifo0;
@@ -202,12 +202,12 @@ impl NerCan {
             match filter.id2 {
                 Some(id2) => {
                     ext.filter = DedicatedDual(
-                        ExtendedId::new(filter.id1).unwrap(),
-                        ExtendedId::new(id2).unwrap(),
+                        filter.id1,
+                        id2,
                     );
                 }
                 None => {
-                    ext.filter = DedicatedSingle(ExtendedId::new(filter.id1).unwrap());
+                    ext.filter = DedicatedSingle(filter.id1);
                 }
             }
             ext.action = Action::StoreInFifo0;
