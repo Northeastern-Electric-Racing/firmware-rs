@@ -101,7 +101,7 @@ pub mod conv {
         }
         let mut v = 0u64;
         for &b in data {
-            v = (v << 8) | b as u64;
+            v = (v << 8_i32) | b as u64;
         }
         Some(v << (8 * (repr_bytes - len)))
     }
