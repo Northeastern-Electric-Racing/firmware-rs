@@ -2,6 +2,7 @@ use definition_rs::{CANMsg, NetField, OdysseyMsg};
 use heck::{AsPascalCase, AsSnakeCase};
 use proc_macro::TokenStream;
 use quote::quote;
+use std::collections::HashMap;
 use std::fs;
 use syn::Ident;
 
@@ -12,14 +13,14 @@ const CANGEN_SPEC_PATH: &str = concat!(
     "/Odyssey-Definitions/can-messages/"
 );
 
-#[proc_macro]
-pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
+/// Read and parse every spec file, keeping only CAN messages.
+fn load_msgs() -> Vec<CANMsg> {
     // get the parsed JSON of each valid spec file
     let __parsed = match fs::read_dir(CANGEN_SPEC_PATH) {
         Ok(__parsed) => __parsed,
         Err(__error) => {
             eprintln!("Could not read from directory: {CANGEN_SPEC_PATH} with error: {__error}");
-            return TokenStream::new();
+            return Vec::new();
         }
     };
 
@@ -46,16 +47,23 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
         .collect();
 
     // keep only CAN messages
-    let msgs: Vec<CANMsg> = __json
+    __json
         .into_iter()
         .filter_map(|f| match f {
             OdysseyMsg::Can(canmsg) => Some(canmsg),
             OdysseyMsg::Meta(_meta_msg) => None,
         })
-        .collect();
+        .collect()
+}
+
+#[proc_macro]
+pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
+    let msgs = load_msgs();
 
     let names: Vec<Ident> = msgs.iter().map(struct_ident).collect();
-    let id_docs: Vec<String> = msgs.iter().map(id_doc).collect();
+    // computed before `build_struct` consumes `msgs`
+    let layouts: Vec<proc_macro2::TokenStream> =
+        msgs.iter().map(|m| doc_lines(&layout_doc(m))).collect();
     let decls: Vec<proc_macro2::TokenStream> = msgs.into_iter().map(build_struct).collect();
 
     // combine the structs together, plus the `Msg` enum for matching
@@ -65,7 +73,7 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
         /// Every known CAN message, decoded.
         #[derive(Clone, Copy)]
         pub enum Msg {
-            #( #[doc = #id_docs] #names(#names), )*
+            #( #layouts #names(#names), )*
         }
 
         impl Msg {
@@ -121,6 +129,97 @@ fn id_doc(msg: &CANMsg) -> String {
     } else {
         format!(" CAN ID: `0x{id:03X}` (standard, 11-bit)")
     }
+}
+
+/// Turn doc lines into `#[doc = ..]` attributes.
+fn doc_lines(lines: &[String]) -> proc_macro2::TokenStream {
+    quote! { #( #[doc = #lines] )* }
+}
+
+/// Map each 1-indexed point position to the `NetField` that documents it.
+fn doc_map(msg: &CANMsg) -> HashMap<usize, &NetField> {
+    let mut map = HashMap::new();
+    for nf in &msg.fields {
+        for &v in &nf.values {
+            map.entry(v).or_insert(nf);
+        }
+    }
+    map
+}
+
+/// Markdown doc lines describing the frame layout, shown in hover tooltips.
+///
+/// The type/scaling logic follows the same precedence as `field_tokens`
+/// (raw f32, then formatter, then `c_type`) so the table matches the
+/// generated accessors.
+fn layout_doc(msg: &CANMsg) -> Vec<String> {
+    let doc_for = doc_map(msg);
+    let bit_cnt: usize = msg.points.iter().map(|p| p.size).sum();
+
+    let mut lines = vec![
+        id_doc(msg),
+        format!(" DLC: {} bytes", bit_cnt.div_ceil(8)),
+        String::new(),
+        " | Bits | Field | Type | Scaling | Units |".into(),
+        " |---|---|---|---|---|".into(),
+    ];
+
+    let mut offset = 0;
+    for (i, p) in msg.points.iter().enumerate() {
+        let bits = if p.size == 1 {
+            format!("{offset}")
+        } else {
+            format!("{}–{}", offset, offset + p.size - 1)
+        };
+        offset += p.size;
+
+        let named = p.name.as_deref().filter(|n| !n.is_empty());
+        let (field, ty, scaling) = match named {
+            Some(n) if p.parse.unwrap_or(true) => {
+                // same name as the generated accessor (see `field_tokens`)
+                let field = format!("`{}`", AsSnakeCase(n).0);
+                let signed = p.signed.unwrap_or(false);
+                let (ty, scaling) = if p.ieee754_f32.unwrap_or(false) {
+                    ("f32".to_string(), "raw IEEE-754".to_string())
+                } else if let Some(fmt) = p
+                    .formatter
+                    .as_ref()
+                    .filter(|f| f.key == "divide" || f.key == "multiply")
+                {
+                    let op = if fmt.key == "divide" { "÷" } else { "×" };
+                    ("f32".to_string(), format!("raw {op} {}", fmt.arg as u32))
+                } else {
+                    match p.c_type.as_deref() {
+                        Some("float") => ("f32".to_string(), "—".to_string()),
+                        Some("bool") if p.size == 1 => ("bool".to_string(), "—".to_string()),
+                        _ => {
+                            let ty = if signed { int_for(p.size) } else { uint_for(p.size) };
+                            let le = p.endianness.as_deref() == Some("little");
+                            let scaling = if le { "little-endian" } else { "—" };
+                            (ty.to_string(), scaling.to_string())
+                        }
+                    }
+                };
+                (field, ty, scaling)
+            }
+            _ => (
+                "*reserved*".to_string(),
+                uint_for(p.size).to_string(),
+                "—".to_string(),
+            ),
+        };
+
+        let units = doc_for
+            .get(&(i + 1))
+            .map(|nf| nf.unit.trim())
+            .filter(|u| !u.is_empty())
+            .unwrap_or("—");
+        lines.push(format!(" | {bits} | {field} | `{ty}` | {scaling} | {units} |"));
+    }
+
+    lines.push(String::new());
+    lines.push(" Bits are numbered MSB-first from the start of the payload.".into());
+    lines
 }
 
 /// Build `#[doc = ..]` attributes for a field from its matched `NetField`.
@@ -388,13 +487,7 @@ fn build_struct(msg: CANMsg) -> proc_macro2::TokenStream {
         _ => 64,
     };
 
-    // Map each 1-indexed point position to the `NetField` that documents it.
-    let mut doc_for: std::collections::HashMap<usize, &NetField> = std::collections::HashMap::new();
-    for nf in &msg.fields {
-        for &v in &nf.values {
-            doc_for.entry(v).or_insert(nf);
-        }
-    }
+    let doc_for = doc_map(&msg);
 
     let mut field_declarations: Vec<proc_macro2::TokenStream> = Vec::new();
     let mut checked_methods: Vec<proc_macro2::TokenStream> = Vec::new();
@@ -422,9 +515,9 @@ fn build_struct(msg: CANMsg) -> proc_macro2::TokenStream {
     let ts = uint_for(bit_cnt);
 
     // Generate the final output Rust code
-    let id_doc_str = id_doc(&msg);
+    let layout = doc_lines(&layout_doc(&msg));
     let expanded = quote! {
-        #[doc = #id_doc_str]
+        #layout
         #[bitfield(#ts, order = Msb)]
         pub struct #struct_name {
             #(#field_declarations),*
