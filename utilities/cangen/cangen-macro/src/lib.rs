@@ -80,8 +80,8 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
             }
         };
             let build = quote! {
-            (#ext, #id) => Msg::#name(#name::from_bits(raw as <#name as CanMessage>::Repr)),
-        };
+                (#ext, #id) => Msg::#name(#name(raw as <#name as CanMessage>::Repr)),
+            };
             (layout, build)
         })
         .unzip();
