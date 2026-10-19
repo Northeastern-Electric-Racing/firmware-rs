@@ -71,14 +71,14 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
             let id = u32::from_str_radix(m.id.trim_start_matches("0x"), 16).unwrap();
             let ext = m.is_ext.unwrap_or(false);
             let layout = quote! {
-            (#ext, #id) => {
-                let _: () = <#name as CanMessage>::CHECK;
-                (
-                    <#name as CanMessage>::LEN,
-                    ::core::mem::size_of::<<#name as CanMessage>::Repr>(),
-                )
-            }
-        };
+                (#ext, #id) => {
+                    let _: () = <#name as CanMessage>::CHECK;
+                    (
+                        <#name as CanMessage>::LEN,
+                        ::core::mem::size_of::<<#name as CanMessage>::Repr>(),
+                    )
+                }
+            };
             let build = quote! {
                 (#ext, #id) => Msg::#name(#name(raw as <#name as CanMessage>::Repr)),
             };
@@ -229,7 +229,11 @@ fn layout_doc(msg: &CANMsg) -> Vec<String> {
                         Some("float") => ("f32".to_string(), "—".to_string()),
                         Some("bool") if p.size == 1 => ("bool".to_string(), "—".to_string()),
                         _ => {
-                            let ty = if signed { int_for(p.size) } else { uint_for(p.size) };
+                            let ty = if signed {
+                                int_for(p.size)
+                            } else {
+                                uint_for(p.size)
+                            };
                             let le = p.endianness.as_deref() == Some("little");
                             let scaling = if le { "little-endian" } else { "—" };
                             (ty.to_string(), scaling.to_string())
@@ -250,7 +254,9 @@ fn layout_doc(msg: &CANMsg) -> Vec<String> {
             .map(|nf| nf.unit.trim())
             .filter(|u| !u.is_empty())
             .unwrap_or("—");
-        lines.push(format!(" | {bits} | {field} | `{ty}` | {scaling} | {units} |"));
+        lines.push(format!(
+            " | {bits} | {field} | `{ty}` | {scaling} | {units} |"
+        ));
     }
 
     lines.push(String::new());
