@@ -95,6 +95,17 @@ pub struct OutOfRange {
 /// - `B` is the field width in bits (used for masking / sign-extension only).
 /// - `ARG` is the formatter argument (the divisor or multiplier).
 pub mod conv {
+    pub fn read_be(data: &[u8], len: usize, repr_bytes: usize) -> Option<u64> {
+        if data.len() != len {
+            return None;
+        }
+        let mut v = 0u64;
+        for &b in data {
+            v = (v << 8) | b as u64;
+        }
+        Some(v << (8 * (repr_bytes - len)))
+    }
+
     macro_rules! scaled {
         ($u:ty, $i:ty, $w:literal,
          $div_from:ident, $div_into:ident, $mul_from:ident, $mul_into:ident,

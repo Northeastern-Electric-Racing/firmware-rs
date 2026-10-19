@@ -64,6 +64,29 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
     // computed before `build_struct` consumes `msgs`
     let layouts: Vec<proc_macro2::TokenStream> =
         msgs.iter().map(|m| doc_lines(&layout_doc(m))).collect();
+
+    // one match arm per message for `Msg::decode_raw`
+    let arms: Vec<proc_macro2::TokenStream> = msgs
+        .iter()
+        .map(|m| {
+            let name = struct_ident(m);
+            let id = u32::from_str_radix(m.id.trim_start_matches("0x"), 16).unwrap();
+            let ext = m.is_ext.unwrap_or(false);
+            quote! {
+                (#ext, #id) => {
+                    let _: () = <#name as CanMessage>::CHECK;
+                    Msg::#name(#name::from(
+                        conv::read_be(
+                            data,
+                            <#name as CanMessage>::LEN,
+                            ::core::mem::size_of::<<#name as CanMessage>::Repr>(),
+                        )? as <#name as CanMessage>::Repr
+                    ))
+                }
+            }
+        })
+        .collect();
+
     let decls: Vec<proc_macro2::TokenStream> = msgs.into_iter().map(build_struct).collect();
 
     // combine the structs together, plus the `Msg` enum for matching
@@ -77,17 +100,23 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
         }
 
         impl Msg {
-            /// Decode a frame into the message matching its ID.
-            /// `None` for unknown IDs or malformed frames.
+            #[inline]
             pub fn decode<F: Frame>(frame: &F) -> Option<Self> {
-                let id = frame.id();
-                #(
-                    if id == <#names as CanMessage>::ID {
-                        return <#names as FromCanFrame>::from_can_frame(frame)
-                            .map(Msg::#names);
-                    }
-                )*
-                None
+                if frame.is_remote_frame() {
+                    return None;
+                }
+                Self::decode_raw(frame.id(), frame.data())
+            }
+
+            pub fn decode_raw(id: Id, data: &[u8]) -> Option<Self> {
+                let key = match id {
+                    Id::Standard(s) => (false, s.as_raw() as u32),
+                    Id::Extended(e) => (true, e.as_raw()),
+                };
+                Some(match key {
+                    #( #arms )*
+                    _ => return None,
+                })
             }
         }
     };
