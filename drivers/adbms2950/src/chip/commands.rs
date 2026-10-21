@@ -348,9 +348,10 @@ pub mod adc {
         SingleShot,
         /// Measure continuously until stopped.
         ///
-        /// The result registers update at the ADC's conversion rate (1 ms for the current
-        /// registers, 8 ms for the averaged ones). To stop, send the same command again with
-        /// `Acquisition::SingleShot`. Corresponds to `CONT = 1`.
+        /// The result registers update at the ADC's conversion rate: 1 ms for the current
+        /// registers, and `ACCN` ms for the averaged ones, where `ACCN = 4 * (ACCI + 1)` from
+        /// CFGA -- so 8 ms only at the default `Samples8` depth. To stop, send the same command
+        /// again with `Acquisition::SingleShot`. Corresponds to `CONT = 1`.
         Continuous,
     }
     impl Acquisition {
