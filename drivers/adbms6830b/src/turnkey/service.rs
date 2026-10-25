@@ -6,6 +6,7 @@
 // maybe even add a .start() flag and a .pause() flag for the service so the sleep recovery stuff can actually be tested, and maybe even low power/sleeo mode could be used if gaf
 
 use embassy_time::{Duration, Instant};
+use crate::spi_timing::BusIdle;
 use embedded_hal_async::spi::SpiDevice;
 use crate::{
     line::{Error, Line}, turnkey::diagnostics::LineDiagnostics,
@@ -143,8 +144,8 @@ impl StartupResult {
     pub const fn is_incomplete(&self) -> bool { matches!(self, StartupResult::Incomplete) }
 }
 
-pub struct Service<SPI: SpiDevice, const N: usize> {
-    api: Api<SPI, N>,
+pub struct Service<SPI: SpiDevice, DELAY: BusIdle, const N: usize> {
+    api: Api<SPI, DELAY, N>,
 
     /// The config this service holds. this is never meant to be mutated after
     /// construction time. The fields are all public tho so the user can declare the
@@ -200,13 +201,13 @@ impl StartupReason {
     pub const fn is_from_sleep(&self) -> bool { matches!(&self, StartupReason::FromSleep) }
 }
 
-impl<SPI: SpiDevice, const N: usize> Service<SPI, N> {
+impl<SPI: SpiDevice, DELAY: BusIdle, const N: usize> Service<SPI, DELAY, N> {
     /// Creates a new service.
     /// ### Parameters
     /// - `line_a`: `Line` instance representing Line A.
     /// - `line_b`: `Line` instance representing Line B.
     /// - `service_config`: High-level service configuration settings in regards to how it runs.
-    pub const fn new(line_a: Line<SPI, N>, line_b: Line<SPI, N>, service_config: service_config::ServiceConfig) -> Self {
+    pub const fn new(line_a: Line<SPI, DELAY, N>, line_b: Line<SPI, DELAY, N>, service_config: service_config::ServiceConfig) -> Self {
         Self {
             api: Api::new(line_a, line_b),
             service_config,
@@ -243,7 +244,7 @@ impl<SPI: SpiDevice, const N: usize> Service<SPI, N> {
     /// StartupResult::Incomplete.
     ///
     /// Important note: You are expected to pass the same closure here every call.
-    pub async fn run(&mut self, mut on_startup: impl AsyncFnMut(&mut Api<SPI, N>, StartupReason) -> StartupResult) -> ServiceDiagnostics<N> {
+    pub async fn run(&mut self, mut on_startup: impl AsyncFnMut(&mut Api<SPI, DELAY, N>, StartupReason) -> StartupResult) -> ServiceDiagnostics<N> {
         let run_started_timestamp = Instant::now(); // timestamp at the start of run
         let period = self.previous_run_timestamp.map(|prev| run_started_timestamp.saturating_duration_since(prev));
         self.previous_run_timestamp = Some(run_started_timestamp);
@@ -370,7 +371,7 @@ impl<SPI: SpiDevice, const N: usize> Service<SPI, N> {
     }
 
     /// Provides exclusive access to the inner `Api`.
-    pub const fn api(&mut self) -> &mut Api<SPI, N> { &mut self.api }
+    pub const fn api(&mut self) -> &mut Api<SPI, DELAY, N> { &mut self.api }
 }
 
 /// Private! Contains the results for a `handle_sleep_detection()` call.
@@ -388,7 +389,7 @@ enum SleepDetectionResult {
 /// # Helpers
 /// 
 /// Internal helpers for the service.
-impl<SPI: SpiDevice, const N: usize> Service<SPI, N> {
+impl<SPI: SpiDevice, DELAY: BusIdle, const N: usize> Service<SPI, DELAY, N> {
     /// PRIVATE! Logic for when a break has been detected.
     /// 
     /// This should be called when a break is detected. `break_chip_index` should be

@@ -9,6 +9,7 @@ default = []
 defmt = ["dep:defmt", "embassy-time/defmt", "embedded-hal-async/defmt-03"]
 
 [dependencies]
+embedded-hal.workspace = true
 embedded-hal-async.workspace = true
 bitfield-struct.workspace = true
 defmt = { workspace = true, optional = true }

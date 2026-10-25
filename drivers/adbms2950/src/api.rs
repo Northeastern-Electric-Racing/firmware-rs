@@ -1,6 +1,7 @@
-//! Higher-level API over one or two [`Line`]s.
+//! The application-facing layer, over one or both isoSPI lines.
 //!
-//! [`Line`] is deliberately dumb: it frames a transaction and hands back bytes. Everything that
+//! The transport under this is deliberately dumb: it frames a transaction, checks the PEC, holds
+//! the bus idle for t5, and hands back bytes. Everything that
 //! needs *memory* between transactions lives here -- the command counter, PEC tallies, the
 //! cached configuration, and per-line error counts. Without this layer each of those ends up
 //! reimplemented in the application, which is where they were before this module existed.
@@ -12,7 +13,10 @@ use crate::chip::commands::{self, Command};
 use crate::chip::registers::config_a::ConfigA;
 use crate::chip::registers::config_b::ConfigB;
 use crate::chip::registers::{ReadableGroup, WritableGroup};
-use crate::line::{COMMAND_COUNTER_MAX, Error, Line, conversion_times};
+use crate::line::{COMMAND_COUNTER_MAX, Line};
+use crate::spi_timing::BusIdle;
+
+pub use crate::line::{Error, Response, conversion_times};
 
 /// Which isoSPI line a transaction went out on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,9 +138,12 @@ impl Default for DeviceState {
 }
 
 /// Stateful API over one ADBMS2950B.
-pub struct Api<SPI> {
-    line_a: Line<SPI>,
-    line_b: Line<SPI>,
+///
+/// This is the layer applications are meant to hold. It owns both lines outright, so the
+/// transport cannot be reached around it and the command counter cannot drift.
+pub struct Api<SPI, DELAY> {
+    line_a: Line<SPI, DELAY>,
+    line_b: Line<SPI, DELAY>,
     active: LineId,
     device: DeviceState,
     config_a: ConfigA,
@@ -145,15 +152,18 @@ pub struct Api<SPI> {
     line_b_error_count: u32,
 }
 
-impl<SPI: SpiDevice> Api<SPI> {
-    /// Wraps both isoSPI lines, with line A active.
+impl<SPI: SpiDevice, DELAY: BusIdle> Api<SPI, DELAY> {
+    /// Builds both isoSPI lines from their devices, with line A active.
+    ///
+    /// Each line takes its own delay, though one shared value is usually right -- [`BusIdle`]
+    /// only reads a counter.
     ///
     /// The cached configuration starts at `ConfigA::new()` (the datasheet reset values); it
     /// becomes accurate as soon as you call [`Api::set_configa`].
-    pub const fn new(line_a: Line<SPI>, line_b: Line<SPI>) -> Self {
+    pub const fn new(spi_a: SPI, spi_b: SPI, delay_a: DELAY, delay_b: DELAY) -> Self {
         Self {
-            line_a,
-            line_b,
+            line_a: Line::new(spi_a, delay_a),
+            line_b: Line::new(spi_b, delay_b),
             active: LineId::A,
             device: DeviceState::new(),
             config_a: ConfigA::new(),
@@ -161,6 +171,11 @@ impl<SPI: SpiDevice> Api<SPI> {
             line_a_error_count: 0,
             line_b_error_count: 0,
         }
+    }
+
+    /// Hands both lines' SPI devices and delays back. All tracked state is dropped with the `Api`.
+    pub fn release(self) -> ((SPI, DELAY), (SPI, DELAY)) {
+        (self.line_a.release(), self.line_b.release())
     }
 
     /// Device health: command counter, PEC tallies, last contact.
@@ -219,7 +234,7 @@ impl<SPI: SpiDevice> Api<SPI> {
     }
 
     /// The active line, for the rare case you need the transport directly.
-    fn line(&mut self) -> &mut Line<SPI> {
+    fn line(&mut self) -> &mut Line<SPI, DELAY> {
         match self.active {
             LineId::A => &mut self.line_a,
             LineId::B => &mut self.line_b,
@@ -234,52 +249,47 @@ impl<SPI: SpiDevice> Api<SPI> {
         }
     }
 
-    /// Records a successful transaction.
-    fn note_success(&mut self) {
-        self.device.last_contacted = Some(Instant::now());
-    }
-
-    /// Reads a register group.
-    ///
-    /// Unlike [`Line::read`] this returns the group alone: the command counter that came with it
-    /// is folded into [`Api::device`] instead, alongside the PEC tallies, so callers do not have
-    /// to remember to thread per-reading metadata around.
-    ///
-    /// Reads do not increment the device's command counter, so this only ever *checks* it.
-    pub async fn read<G: ReadableGroup>(&mut self) -> Result<G, Error<SPI::Error>> {
-        match self.line().read::<G>().await {
-            Ok(response) => {
-                self.device.pec_success_count = self.device.pec_success_count.saturating_add(1);
-                self.device.reported_command_counter = Some(response.command_counter);
-                self.note_success();
-                Ok(response.data)
-            }
+    /// Folds a transport result into the device tallies, so the timestamp, PEC count and
+    /// per-line error count live in one place rather than at each call site.
+    fn record<T>(&mut self, result: Result<T, Error<SPI::Error>>) -> Result<T, Error<SPI::Error>> {
+        match &result {
+            Ok(_) => self.device.last_contacted = Some(Instant::now()),
             Err(err) => {
                 if matches!(err, Error::Pec) {
                     self.device.pec_failed_count = self.device.pec_failed_count.saturating_add(1);
                 }
                 self.note_error();
-                Err(err)
             }
         }
+        result
+    }
+
+    /// Reads a register group.
+    ///
+    /// Unlike the transport's read, this returns the group alone: the command counter that came with it
+    /// is folded into [`Api::device`] instead, alongside the PEC tallies, so callers do not have
+    /// to remember to thread per-reading metadata around.
+    ///
+    /// Reads do not increment the device's command counter, so this only ever *checks* it.
+    pub async fn read<G: ReadableGroup>(&mut self) -> Result<G, Error<SPI::Error>> {
+        let result = self.line().read::<G>().await;
+        let response = self.record(result)?;
+
+        self.device.pec_success_count = self.device.pec_success_count.saturating_add(1);
+        self.device.reported_command_counter = Some(response.command_counter);
+        Ok(response.data)
     }
 
     /// Writes a register group, keeping the expected command counter in step.
     pub async fn write<G: WritableGroup>(&mut self, group: G) -> Result<(), Error<SPI::Error>> {
         let increments = G::WRITE_COMMAND.increments();
-        match self.line().write(group).await {
-            Ok(()) => {
-                if increments {
-                    self.device.advance();
-                }
-                self.note_success();
-                Ok(())
-            }
-            Err(err) => {
-                self.note_error();
-                Err(err)
-            }
+        let result = self.line().write(group).await;
+        self.record(result)?;
+
+        if increments {
+            self.device.advance();
         }
+        Ok(())
     }
 
     /// Sends a command, keeping the expected command counter in step.
@@ -290,21 +300,15 @@ impl<SPI: SpiDevice> Api<SPI> {
         let increments = command.increments();
         let resets = command.resets_counter();
 
-        match self.line().command(command.frame()).await {
-            Ok(()) => {
-                if resets {
-                    self.device.expected_command_counter = 0;
-                } else if increments {
-                    self.device.advance();
-                }
-                self.note_success();
-                Ok(())
-            }
-            Err(err) => {
-                self.note_error();
-                Err(err)
-            }
+        let result = self.line().command(command.frame()).await;
+        self.record(result)?;
+
+        if resets {
+            self.device.expected_command_counter = 0;
+        } else if increments {
+            self.device.advance();
         }
+        Ok(())
     }
 
     /// Writes `ConfigA` and caches it.
@@ -379,7 +383,9 @@ impl<SPI: SpiDevice> Api<SPI> {
     /// [`Api::wait_for_reference`] before trusting any measurement.
     pub async fn reset(&mut self) -> Result<(), Error<SPI::Error>> {
         self.command(commands::misc::srst()).await?;
-        self.line().wait_after_reset().await;
+        // tWAKE: the regulator has to come back up before the chip will answer again.
+        embassy_time::Timer::after(Duration::from_micros(conversion_times::WAKE_MAX_US as u64))
+            .await;
         self.config_a = ConfigA::new();
         self.config_b = ConfigB::new();
         Ok(())
@@ -395,25 +401,53 @@ impl<SPI: SpiDevice> Api<SPI> {
         self.line().wakeup().await
     }
 
-    /// Waits for the voltage references to come up.
+    /// Waits for the voltage references to come up, by polling the `REFUP` bit in CFGA.
+    ///
+    /// After power-up or an `SRST` the chip passes through STANDBY into REFUP on its own; this
+    /// is how you find out it has arrived. Measurements taken before this are not trustworthy.
+    ///
+    /// Each attempt is a full [`Api::read`], so the tallies stay current while waiting.
     pub async fn wait_for_reference(&mut self) -> Result<(), Error<SPI::Error>> {
-        self.line().wait_for_reference().await
+        use crate::chip::registers::config_a::types::ReferencePowered;
+
+        let deadline =
+            Instant::now() + Duration::from_millis(conversion_times::REFUP_MAX_MS as u64 * 2);
+
+        loop {
+            if let Ok(config) = self.read::<ConfigA>().await
+                && config.refup() == ReferencePowered::Powered
+            {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(Error::Timeout);
+            }
+            embassy_time::Timer::after(Duration::from_micros(500)).await;
+        }
     }
 
     /// Confirms the attached device is an ADBMS2950B, returning its serial ID.
+    ///
+    /// Reads `RDSID` and checks the `DEVID` bits. Useful as a presence check.
     pub async fn detect(
         &mut self,
     ) -> Result<crate::chip::registers::serial_id::SerialId, Error<SPI::Error>> {
-        self.line().detect().await
+        use crate::chip::registers::serial_id::SerialId;
+
+        let id = self.read::<SerialId>().await?;
+        if !id.is_adbms2950b() {
+            return Err(Error::WrongDevice(id.device_id()));
+        }
+        Ok(id)
     }
 
     /// Sends a conversion command, then polls until it completes.
     ///
-    /// Poll commands increment the device's command counter, and a poll loop runs an
-    /// unpredictable number of times, so this drives the loop itself and counts each attempt.
-    /// Delegating to [`Line::poll_until`] would silently desynchronize
+    /// Poll commands increment the device's command counter and a poll loop runs an
+    /// unpredictable number of times, so the loop has to live at this layer: anything driving
+    /// the transport's poll without counting the attempts would desynchronize
     /// [`DeviceState::expected_command_counter`] and make every subsequent read look like a
-    /// counter mismatch.
+    /// counter mismatch. That is why the transport has no poll loop of its own.
     async fn autoconvert(
         &mut self,
         start: Command,
@@ -428,17 +462,12 @@ impl<SPI: SpiDevice> Api<SPI> {
         let poll_frame = poll.frame();
 
         loop {
-            let done = match self.line().poll(poll_frame).await {
-                Ok(done) => done,
-                Err(err) => {
-                    self.note_error();
-                    return Err(err);
-                }
-            };
+            let result = self.line().poll(poll_frame).await;
+            let done = self.record(result)?;
+
             if poll.increments() {
                 self.device.advance();
             }
-            self.note_success();
 
             if done {
                 return Ok(());
