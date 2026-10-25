@@ -13,6 +13,7 @@ embedded-hal-async = { version = "1" }
 embedded-can = "0.4.1"
 bitfield-struct = "0.13"
 
+bisync = "0.3" # Dev yanked this; patched to the archived repo below
 device-driver = { version = "1.0.9" }
 arbitrary-int = { version = "2.1.1" }
 
@@ -24,13 +25,16 @@ embassy-stm32 = { version = "0.6.0", features = ["stm32h563zi", "defmt", "unstab
 embassy-net = { version = "0.9.1", features = ["udp", "tcp", "medium-ethernet", "ipv4", "icmp-ping-reply", "defmt"] }
 embassy-sync = { version = "0.8.0", features = ["defmt"] }
 embassy-time = { version = "0.5.1", features = ["defmt"] }
+embassy-embedded-hal = { version = "0.6.0" }
 
 [patch.crates-io]
+bisync = { git = "https://github.com/JM4ier/bisync", rev = "be3a0a6" }
 embassy-executor = { git = "https://github.com/embassy-rs/embassy", rev = "c0c0419f48c67e160ab0e3a8a93dcaaa2d4e84fb" }
 embassy-stm32 = { git = "https://github.com/embassy-rs/embassy", rev = "c0c0419f48c67e160ab0e3a8a93dcaaa2d4e84fb" }
 embassy-net = { git = "https://github.com/embassy-rs/embassy", rev = "c0c0419f48c67e160ab0e3a8a93dcaaa2d4e84fb" }
 embassy-sync = { git = "https://github.com/embassy-rs/embassy", rev = "c0c0419f48c67e160ab0e3a8a93dcaaa2d4e84fb" }
 embassy-time = { git = "https://github.com/embassy-rs/embassy", rev = "c0c0419f48c67e160ab0e3a8a93dcaaa2d4e84fb" }
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy", rev = "c0c0419f48c67e160ab0e3a8a93dcaaa2d4e84fb" }
 
 
 [workspace.lints.clippy]

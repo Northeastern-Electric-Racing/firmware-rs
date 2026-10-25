@@ -1,0 +1,19 @@
+[package]
+name = "lsm6dsv16x-ner"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cangen = { git = "https://github.com/Northeastern-Electric-Racing/firmware-rs.git", rev = "2226d9a858cc40f3be02ec79a9a070f300b390af" }
+defmt.workspace = true
+embassy-embedded-hal.workspace = true
+embassy-executor.workspace = true
+embassy-stm32.workspace = true
+embassy-sync.workspace = true
+embassy-time.workspace = true
+lsm6dsv16x-rs = "2.1.0"
+st-mems-bus = "2.0.0"
+uom = { version = "0.38.0", default-features = false, features = ["si", "f32"] }
+
+[lints]
+workspace = true
