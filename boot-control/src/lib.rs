@@ -1,46 +1,38 @@
 #![no_std]
 
-//! Application startup confirmation and CAN bootloader entry for STM32H563ZI.
-//! CAN initialization, receive filters, and frame dispatch stay with the application.
+//! Shared CAN boot-request matching and application boot control.
 
-use core::cell::RefCell;
-
-use embassy_boot_stm32::{AlignedBuffer, BlockingFirmwareState};
-use embassy_embedded_hal::flash::partition::BlockingPartition;
-use embassy_stm32::Peri;
-use embassy_stm32::flash::{Blocking, Flash, WRITE_SIZE};
-use embassy_stm32::peripherals::FLASH;
-use embassy_sync::blocking_mutex::Mutex;
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embedded_can::{Frame, Id};
 
-pub use embassy_boot_stm32::FirmwareUpdaterError;
-
-// Reserve an 8 KiB boot-state sector at 0x081FA000 in the bootloader layout.
-// Offsets below are relative to the start of flash.
-const STATE_OFFSET: u32 = 0x001F_A000;
-const STATE_SIZE: u32 = 0x2000;
 const BOOT_REQUEST_DATA: &[u8] = &[0xB0, 0x07, 0x10, 0xAD];
 
-/// Own flash access for startup confirmation and persistent bootloader requests.
-pub struct Bootloader<'d> {
-    flash: Mutex<NoopRawMutex, RefCell<Flash<'d, Blocking>>>,
+/// Platform operations for persistent boot state and system reset.
+pub trait Platform {
+    type Error;
+
+    fn confirm_boot(&mut self) -> Result<(), Self::Error>;
+    fn request_boot(&mut self) -> Result<(), Self::Error>;
+    fn reset() -> !;
+}
+
+/// Match CAN boot requests and persist state before resetting.
+pub struct BootControl<P> {
+    platform: P,
     request_id: Id,
 }
 
-impl<'d> Bootloader<'d> {
+impl<P: Platform> BootControl<P> {
     /// Configure an exact CAN data-frame match without initializing CAN.
-    pub fn new(flash: Peri<'d, FLASH>, request_id: Id) -> Self {
+    pub fn new(platform: P, request_id: Id) -> Self {
         Self {
-            flash: Mutex::new(RefCell::new(Flash::new_blocking(flash))),
+            platform,
             request_id,
         }
     }
 
-    /// Confirm successful application initialization to prevent rollback on reset.
-    /// Call only after the application's required startup checks have succeeded.
-    pub fn confirm_boot(&mut self) -> Result<(), FirmwareUpdaterError> {
-        self.write_state(false)
+    /// Confirm startup after the application's required checks have succeeded.
+    pub fn confirm_boot(&mut self) -> Result<(), P::Error> {
+        self.platform.confirm_boot()
     }
 
     /// Check the ID, frame type, and complete payload before accepting a request.
@@ -50,26 +42,14 @@ impl<'d> Bootloader<'d> {
             && frame.data() == BOOT_REQUEST_DATA
     }
 
-    /// Ignore unrelated frames; persist a matching request and reset into the bootloader.
-    /// Returns an error without resetting if the flash operation fails.
-    /// Call from a task, after any application-specific shutdown needed before reset.
-    pub fn handle_frame(&mut self, frame: &impl Frame) -> Result<(), FirmwareUpdaterError> {
+    /// Persist a matching request and reset; ignore unrelated frames.
+    /// A failed state write returns an error without resetting.
+    /// Call after any application-specific shutdown needed before reset.
+    pub fn handle_frame(&mut self, frame: &impl Frame) -> Result<(), P::Error> {
         if self.is_request(frame) {
-            self.write_state(true)?;
-            cortex_m::peripheral::SCB::sys_reset();
+            self.platform.request_boot()?;
+            P::reset();
         }
         Ok(())
-    }
-
-    // Construct the short-lived partition and aligned buffer without self-references.
-    fn write_state(&mut self, detach: bool) -> Result<(), FirmwareUpdaterError> {
-        let partition = BlockingPartition::new(&self.flash, STATE_OFFSET, STATE_SIZE);
-        let mut aligned = AlignedBuffer([0; WRITE_SIZE]);
-        let mut state = BlockingFirmwareState::new(partition, aligned.as_mut());
-        if detach {
-            state.mark_dfu()
-        } else {
-            state.mark_booted()
-        }
     }
 }

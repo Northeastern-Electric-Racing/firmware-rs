@@ -1,5 +1,5 @@
 [workspace]
-members = ["drivers/*", "platform/*", "utilities/*", "boot-control"]
+members = ["drivers/*", "platform/*", "utilities/*", "boot-control", "boot-control/platforms/*"]
 resolver = "3"
 
 # Keep standalone host tools outside embedded workspace builds.
