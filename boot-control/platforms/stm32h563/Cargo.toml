@@ -8,7 +8,7 @@ links = "boot_control_stm32h563"
 [dependencies]
 boot-control-core = { package = "boot-control", path = "../.." }
 cortex-m = "0.7"
-embassy-boot-stm32 = "0.8.0"
+embassy-boot = "0.7.0"
 embassy-embedded-hal = "0.6.0"
 embassy-stm32 = { version = "0.6.0", features = ["stm32h563zi", "dual-bank"] }
 embassy-sync = "0.8.0"

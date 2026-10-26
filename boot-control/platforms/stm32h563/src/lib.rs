@@ -6,7 +6,7 @@
 use core::cell::RefCell;
 
 use boot_control_core::{BootControl, Platform};
-use embassy_boot_stm32::{AlignedBuffer, BlockingFirmwareState};
+use embassy_boot::{AlignedBuffer, BlockingFirmwareState};
 use embassy_embedded_hal::flash::partition::BlockingPartition;
 use embassy_stm32::Peri;
 use embassy_stm32::flash::{Blocking, Flash, WRITE_SIZE};
@@ -14,7 +14,7 @@ use embassy_stm32::peripherals::FLASH;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 
-pub use embassy_boot_stm32::FirmwareUpdaterError;
+pub use embassy_boot::FirmwareUpdaterError;
 
 // Reserve an 8 KiB boot-state sector at 0x081FA000 in the bootloader layout.
 // Offsets below are relative to the start of flash.
