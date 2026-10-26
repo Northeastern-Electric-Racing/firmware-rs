@@ -13,7 +13,6 @@ use embassy_stm32::flash::{Blocking, Flash, WRITE_SIZE};
 use embassy_stm32::peripherals::FLASH;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embedded_can::{Frame, Id};
 
 pub use embassy_boot_stm32::FirmwareUpdaterError;
 
@@ -28,13 +27,13 @@ pub struct Bootloader<'d> {
 }
 
 impl<'d> Bootloader<'d> {
-    /// Configure an exact CAN data-frame match without initializing CAN.
-    pub fn new(flash: Peri<'d, FLASH>, request_id: Id) -> Self {
+    /// Own flash access for boot confirmation and entry requests.
+    pub fn new(flash: Peri<'d, FLASH>) -> Self {
         let state = FlashState {
             flash: Mutex::new(RefCell::new(Flash::new_blocking(flash))),
         };
         Self {
-            control: BootControl::new(state, request_id),
+            control: BootControl::new(state),
         }
     }
 
@@ -44,16 +43,12 @@ impl<'d> Bootloader<'d> {
         self.control.confirm_boot()
     }
 
-    /// Check the ID, frame type, and complete payload before accepting a request.
-    pub fn is_request(&self, frame: &impl Frame) -> bool {
-        self.control.is_request(frame)
-    }
-
-    /// Ignore unrelated frames; persist a matching request and reset into the bootloader.
-    /// Returns an error without resetting if the flash operation fails.
-    /// Call from a task, after any application-specific shutdown needed before reset.
-    pub fn handle_frame(&mut self, frame: &impl Frame) -> Result<(), FirmwareUpdaterError> {
-        self.control.handle_frame(frame)
+    /// Validate boot-request data, persist the request, and reset.
+    /// The caller must match the request ID and reject remote frames first.
+    /// Invalid data is ignored; a failed state write returns without resetting.
+    /// Call after any application-specific shutdown needed before reset.
+    pub fn handle_request(&mut self, data: &[u8]) -> Result<(), FirmwareUpdaterError> {
+        self.control.handle_request(data)
     }
 }
 

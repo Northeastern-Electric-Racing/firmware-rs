@@ -2,8 +2,6 @@
 
 //! Shared CAN boot-request matching and application boot control.
 
-use embedded_can::{Frame, Id};
-
 const BOOT_REQUEST_DATA: &[u8] = &[0xB0, 0x07, 0x10, 0xAD];
 
 /// Platform operations for persistent boot state and system reset.
@@ -18,16 +16,12 @@ pub trait Platform {
 /// Match CAN boot requests and persist state before resetting.
 pub struct BootControl<P> {
     platform: P,
-    request_id: Id,
 }
 
 impl<P: Platform> BootControl<P> {
-    /// Configure an exact CAN data-frame match without initializing CAN.
-    pub fn new(platform: P, request_id: Id) -> Self {
-        Self {
-            platform,
-            request_id,
-        }
+    /// Use the platform's boot-state storage and reset implementation.
+    pub fn new(platform: P) -> Self {
+        Self { platform }
     }
 
     /// Confirm startup after the application's required checks have succeeded.
@@ -35,18 +29,11 @@ impl<P: Platform> BootControl<P> {
         self.platform.confirm_boot()
     }
 
-    /// Check the ID, frame type, and complete payload before accepting a request.
-    pub fn is_request(&self, frame: &impl Frame) -> bool {
-        !frame.is_remote_frame()
-            && frame.id() == self.request_id
-            && frame.data() == BOOT_REQUEST_DATA
-    }
-
-    /// Persist a matching request and reset; ignore unrelated frames.
-    /// A failed state write returns an error without resetting.
-    /// Call after any application-specific shutdown needed before reset.
-    pub fn handle_frame(&mut self, frame: &impl Frame) -> Result<(), P::Error> {
-        if self.is_request(frame) {
+    /// Validate boot-request data, persist the request, and reset.
+    /// The caller must match the request ID and reject remote frames first.
+    /// Invalid data is ignored; a failed state write returns without resetting.
+    pub fn handle_request(&mut self, data: &[u8]) -> Result<(), P::Error> {
+        if data == BOOT_REQUEST_DATA {
             self.platform.request_boot()?;
             P::reset();
         }
