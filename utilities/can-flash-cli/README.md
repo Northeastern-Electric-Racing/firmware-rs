@@ -67,7 +67,7 @@ Run `can flash --help` for all options.
   `--already-in-bootloader` to skip this if the ECU has no valid application or is
   already in update mode.
 - Ajax handles one flash at a time and rejects uploads while busy. Check it
-  with `GET <url>/status`, which returns `idle` or `busy`.
+  with `curl <url>/status`, which returns `idle` or `busy`.
 - The CLI does not retry uploads. If the connection drops, Ajax stops the
   flash before its next CAN operation. Wait for Ajax to report `idle` before
   trying again. If the ECU stayed in update mode, use `--already-in-bootloader`.
