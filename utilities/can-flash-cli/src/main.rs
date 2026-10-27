@@ -36,27 +36,19 @@ struct CanFlash {
     #[arg(long)]
     ecu: Option<String>,
     /// Application ELF; extensionless Cargo outputs are supported.
-    #[arg(long, conflicts_with_all = ["package", "bin", "debug", "release"])]
+    #[arg(long, conflicts_with = "package")]
     elf: Option<PathBuf>,
     /// Cargo package to flash when running from a workspace root.
     #[arg(short, long)]
     package: Option<String>,
-    /// Binary to flash when the package provides multiple binaries.
-    #[arg(long)]
-    bin: Option<String>,
-    /// Select an ELF from the debug build directory.
-    #[arg(long, conflicts_with = "release")]
-    debug: bool,
-    /// Select an ELF from the release build directory.
-    #[arg(long)]
-    release: bool,
     /// Skip requesting entry when the ECU is already in the bootloader.
     #[arg(long)]
     already_in_bootloader: bool,
-    /// Maximum upload and flashing wait in seconds.
-    #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..))]
-    timeout: u64,
 }
+
+// Maximum wait for the server to respond or send the next progress update.
+// Keep above the server's 60 s upload limit so its error is reported instead.
+const SERVER_TIMEOUT: Duration = Duration::from_secs(120);
 
 fn cargo_json(arguments: &[&str]) -> Result<serde_json::Value> {
     let output = std::process::Command::new("cargo")
@@ -111,12 +103,7 @@ fn find_package(package_name: Option<&str>) -> Result<(serde_json::Value, serde_
     Ok((metadata, package))
 }
 
-fn find_elf(
-    metadata: &serde_json::Value,
-    package: &serde_json::Value,
-    binary_name: Option<&str>,
-    profile: Option<&str>,
-) -> Result<PathBuf> {
+fn find_elf(metadata: &serde_json::Value, package: &serde_json::Value) -> Result<PathBuf> {
     let targets = package["targets"]
         .as_array()
         .context("package has no targets")?;
@@ -129,35 +116,23 @@ fn find_elf(
         })
         .filter_map(|t| t["name"].as_str())
         .collect();
-    let name = match binary_name.or_else(|| package["default_run"].as_str()) {
-        Some(name) if binaries.contains(&name) => name,
-        Some(name) => bail!("package has no binary named {name}"),
-        None if binaries.len() == 1 => binaries[0],
-        _ => bail!("select an application binary with --bin <name>"),
+    let name = match binaries[..] {
+        [name] => name,
+        [] => bail!("package has no binary file to flash"),
+        _ => bail!("multiple binary files found in package; select one with --elf"),
     };
     let target = PathBuf::from(
         metadata["target_directory"]
             .as_str()
             .context("missing Cargo target directory")?,
     );
-    let profiles: &[&str] = match profile {
-        Some("debug") => &["debug"],
-        Some("release") => &["release"],
-        Some(_) => bail!("unsupported build profile"),
-        None => &["debug", "release"],
-    };
     // Cargo stores binaries directly or below a target triple directory.
-    let mut candidates: Vec<_> = profiles
-        .iter()
-        .map(|profile| target.join(profile).join(name))
-        .collect();
+    let mut candidates = vec![target.join("release").join(name)];
     if target.is_dir() {
         for entry in std::fs::read_dir(&target)? {
             let entry = entry?;
             if entry.file_type()?.is_dir() {
-                for profile in profiles {
-                    candidates.push(entry.path().join(profile).join(name));
-                }
+                candidates.push(entry.path().join("release").join(name));
             }
         }
     }
@@ -166,17 +141,11 @@ fn find_elf(
     candidates.dedup();
     match candidates.as_slice() {
         [path] => Ok(path.clone()),
-        [] => bail!(
-            "no {} ELF found for {name}; build the application first, or pass --elf",
-            profile.unwrap_or("debug or release")
-        ),
+        [] => {
+            bail!("no release ELF found for {name}; run cargo build --release first, or pass --elf")
+        }
         _ => bail!(
-            "multiple binaries found; {}:\n{}",
-            if profile.is_some() {
-                "select one with --elf"
-            } else {
-                "select --debug or --release, or specify --elf"
-            },
+            "multiple release binaries found; select one with --elf:\n{}",
             candidates
                 .iter()
                 .map(|p| p.display().to_string())
@@ -223,14 +192,7 @@ fn flash(args: CanFlash) -> Result<()> {
         Some(path) => path.clone(),
         None => {
             let (metadata, package) = project.as_ref().context("missing Cargo project")?;
-            let profile = if args.debug {
-                Some("debug")
-            } else if args.release {
-                Some("release")
-            } else {
-                None
-            };
-            find_elf(metadata, package, args.bin.as_deref(), profile)?
+            find_elf(metadata, package)?
         }
     };
     let url = endpoint(args.host)?;
@@ -250,7 +212,7 @@ fn flash(args: CanFlash) -> Result<()> {
         .file("file", &elf)?;
     let client = Client::builder()
         .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(args.timeout))
+        .timeout(SERVER_TIMEOUT)
         // A flash request must not be silently forwarded to another endpoint.
         .redirect(Policy::none())
         .build()?;
@@ -603,11 +565,7 @@ mod tests {
                 ecu: Some("bms".into()),
                 elf: Some(path.clone()),
                 package: None,
-                bin: None,
-                debug: false,
-                release: false,
                 already_in_bootloader: true,
-                timeout: 5,
             })
             .unwrap_err();
             worker.join().unwrap();
@@ -667,11 +625,7 @@ mod tests {
                 ecu: Some("bms".into()),
                 elf: Some(path.clone()),
                 package: None,
-                bin: None,
-                debug: false,
-                release: false,
                 already_in_bootloader: true,
-                timeout: 5,
             });
             assert_eq!(result.is_ok(), succeeds, "{result:?}");
             let request = String::from_utf8(worker.join().unwrap()).unwrap();
