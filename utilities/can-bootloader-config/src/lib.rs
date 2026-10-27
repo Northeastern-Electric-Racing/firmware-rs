@@ -7,8 +7,8 @@ const ECUS_JSON: &str =
 /// Generate typed CAN IDs and the line bitrate for the selected ECU in OUT_DIR.
 pub fn generate(ecu: &str) -> Result<(), Box<dyn Error>> {
     let config: Value = serde_json::from_str(ECUS_JSON)?;
-    if config["schema_version"].as_u64() != Some(2) {
-        return Err("Unsupported ecus.json schema_version; expected 2".into());
+    if config["schema_version"].as_u64() != Some(1) {
+        return Err("Unsupported ecus.json schema_version; expected 1".into());
     }
     let can = config["ecus"][ecu]["can"]
         .as_object()
