@@ -66,8 +66,8 @@ Run `can flash --help` for all options.
   running application, which must handle it with `boot-control`. Use
   `--already-in-bootloader` to skip this if the ECU has no valid application or is
   already in update mode.
-- Ajax handles one flash at a time and rejects uploads while busy. Check it
-  with `curl <url>/status`, which returns `idle` or `busy`.
+- Ajax handles one flash at a time and rejects uploads while busy.
 - The CLI does not retry uploads. If the connection drops, Ajax stops the
-  flash before its next CAN operation. Wait for Ajax to report `idle` before
-  trying again. If the ECU stayed in update mode, use `--already-in-bootloader`.
+  flash before its next CAN operation. If a retry reports that Ajax is busy, wait
+  a few seconds and try again. If the ECU stayed in update mode, use
+  `--already-in-bootloader`.
