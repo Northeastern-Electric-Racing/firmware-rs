@@ -36,7 +36,7 @@ struct CanFlash {
     #[arg(long)]
     ecu: Option<String>,
     /// Application ELF to flash instead of building.
-    #[arg(long, conflicts_with_all = ["package", "features", "all_features", "no_default_features"])]
+    #[arg(long, conflicts_with_all = ["package", "features"])]
     elf: Option<PathBuf>,
     /// Cargo package to build and flash when running from a workspace root.
     #[arg(short, long)]
@@ -44,12 +44,6 @@ struct CanFlash {
     /// Features to build with, as for cargo build.
     #[arg(short = 'F', long)]
     features: Vec<String>,
-    /// Build with all features enabled.
-    #[arg(long)]
-    all_features: bool,
-    /// Build without the default features.
-    #[arg(long)]
-    no_default_features: bool,
     /// Skip requesting entry when the ECU is already in the bootloader.
     #[arg(long)]
     already_in_bootloader: bool,
@@ -124,12 +118,6 @@ fn build_elf(package: &serde_json::Value, args: &CanFlash) -> Result<PathBuf> {
     ]);
     for features in &args.features {
         command.args(["--features", features]);
-    }
-    if args.all_features {
-        command.arg("--all-features");
-    }
-    if args.no_default_features {
-        command.arg("--no-default-features");
     }
     // Build progress and errors stay on stderr; stdout carries the artifact messages.
     let output = command
@@ -570,8 +558,6 @@ mod tests {
                 elf: Some(path.clone()),
                 package: None,
                 features: Vec::new(),
-                all_features: false,
-                no_default_features: false,
                 already_in_bootloader: true,
             })
             .unwrap_err();
@@ -633,8 +619,6 @@ mod tests {
                 elf: Some(path.clone()),
                 package: None,
                 features: Vec::new(),
-                all_features: false,
-                no_default_features: false,
                 already_in_bootloader: true,
             });
             assert_eq!(result.is_ok(), succeeds, "{result:?}");
