@@ -35,12 +35,21 @@ struct CanFlash {
     /// ECU name; overrides package.metadata.can-flash.ecu from Cargo.toml.
     #[arg(long)]
     ecu: Option<String>,
-    /// Application ELF; extensionless Cargo outputs are supported.
-    #[arg(long, conflicts_with = "package")]
+    /// Application ELF to flash instead of building.
+    #[arg(long, conflicts_with_all = ["package", "features", "all_features", "no_default_features"])]
     elf: Option<PathBuf>,
-    /// Cargo package to flash when running from a workspace root.
+    /// Cargo package to build and flash when running from a workspace root.
     #[arg(short, long)]
     package: Option<String>,
+    /// Features to build with, as for cargo build.
+    #[arg(short = 'F', long)]
+    features: Vec<String>,
+    /// Build with all features enabled.
+    #[arg(long)]
+    all_features: bool,
+    /// Build without the default features.
+    #[arg(long)]
+    no_default_features: bool,
     /// Skip requesting entry when the ECU is already in the bootloader.
     #[arg(long)]
     already_in_bootloader: bool,
@@ -63,7 +72,7 @@ fn cargo_json(arguments: &[&str]) -> Result<serde_json::Value> {
     serde_json::from_slice(&output.stdout).context("invalid Cargo metadata")
 }
 
-fn find_package(package_name: Option<&str>) -> Result<(serde_json::Value, serde_json::Value)> {
+fn find_package(package_name: Option<&str>) -> Result<serde_json::Value> {
     let metadata = cargo_json(&[
         "metadata",
         "--no-deps",
@@ -99,59 +108,54 @@ fn find_package(package_name: Option<&str>) -> Result<(serde_json::Value, serde_
     } else {
         bail!("select a project with -p <package>, or run from its directory");
     };
-    let package = package.clone();
-    Ok((metadata, package))
+    Ok(package.clone())
 }
 
-fn find_elf(metadata: &serde_json::Value, package: &serde_json::Value) -> Result<PathBuf> {
-    let targets = package["targets"]
-        .as_array()
-        .context("package has no targets")?;
-    let binaries: Vec<_> = targets
-        .iter()
-        .filter(|t| {
-            t["kind"]
+/// Build the package's release binary and return the built ELF.
+fn build_elf(package: &serde_json::Value, args: &CanFlash) -> Result<PathBuf> {
+    let name = package["name"].as_str().context("package has no name")?;
+    let mut command = std::process::Command::new("cargo");
+    command.args([
+        "build",
+        "--release",
+        "--package",
+        name,
+        "--message-format=json-render-diagnostics",
+    ]);
+    for features in &args.features {
+        command.args(["--features", features]);
+    }
+    if args.all_features {
+        command.arg("--all-features");
+    }
+    if args.no_default_features {
+        command.arg("--no-default-features");
+    }
+    // Build progress and errors stay on stderr; stdout carries the artifact messages.
+    let output = command
+        .stderr(std::process::Stdio::inherit())
+        .output()
+        .context("cannot run Cargo; supply --elf and --ecu to flash without building")?;
+    ensure!(output.status.success(), "build failed");
+
+    let mut binaries = Vec::new();
+    for line in output.stdout.split(|&b| b == b'\n') {
+        let Ok(message) = serde_json::from_slice::<serde_json::Value>(line) else {
+            continue;
+        };
+        let is_binary = message["reason"] == "compiler-artifact"
+            && message["package_id"] == package["id"]
+            && message["target"]["kind"]
                 .as_array()
-                .is_some_and(|kinds| kinds.iter().any(|kind| kind == "bin"))
-        })
-        .filter_map(|t| t["name"].as_str())
-        .collect();
-    let name = match binaries[..] {
-        [name] => name,
-        [] => bail!("package has no binary file to flash"),
-        _ => bail!("multiple binary files found in package; select one with --elf"),
-    };
-    let target = PathBuf::from(
-        metadata["target_directory"]
-            .as_str()
-            .context("missing Cargo target directory")?,
-    );
-    // Cargo stores binaries directly or below a target triple directory.
-    let mut candidates = vec![target.join("release").join(name)];
-    if target.is_dir() {
-        for entry in std::fs::read_dir(&target)? {
-            let entry = entry?;
-            if entry.file_type()?.is_dir() {
-                candidates.push(entry.path().join("release").join(name));
-            }
+                .is_some_and(|kinds| kinds.iter().any(|kind| kind == "bin"));
+        if let (true, Some(path)) = (is_binary, message["executable"].as_str()) {
+            binaries.push(PathBuf::from(path));
         }
     }
-    candidates.retain(|path| path.is_file());
-    candidates.sort();
-    candidates.dedup();
-    match candidates.as_slice() {
+    match binaries.as_slice() {
         [path] => Ok(path.clone()),
-        [] => {
-            bail!("no release ELF found for {name}; run cargo build --release first, or pass --elf")
-        }
-        _ => bail!(
-            "multiple release binaries found; select one with --elf:\n{}",
-            candidates
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join("\n")
-        ),
+        [] => bail!("package has no binary file to flash"),
+        _ => bail!("multiple binary files found in package; select one with --elf"),
     }
 }
 
@@ -184,15 +188,15 @@ fn flash(args: CanFlash) -> Result<()> {
         Some(ecu) => ecu,
         None => project
             .as_ref()
-            .and_then(|(_, package)| package["metadata"]["can-flash"]["ecu"].as_str())
+            .and_then(|package| package["metadata"]["can-flash"]["ecu"].as_str())
             .context("missing or invalid package.metadata.can-flash.ecu in Cargo.toml; pass --ecu explicitly")?,
     };
     ensure!(!ecu.trim().is_empty(), "ECU name must not be empty");
     let elf = match &args.elf {
         Some(path) => path.clone(),
         None => {
-            let (metadata, package) = project.as_ref().context("missing Cargo project")?;
-            find_elf(metadata, package)?
+            let package = project.as_ref().context("missing Cargo project")?;
+            build_elf(package, &args)?
         }
     };
     let url = endpoint(args.host)?;
@@ -565,6 +569,9 @@ mod tests {
                 ecu: Some("bms".into()),
                 elf: Some(path.clone()),
                 package: None,
+                features: Vec::new(),
+                all_features: false,
+                no_default_features: false,
                 already_in_bootloader: true,
             })
             .unwrap_err();
@@ -625,6 +632,9 @@ mod tests {
                 ecu: Some("bms".into()),
                 elf: Some(path.clone()),
                 package: None,
+                features: Vec::new(),
+                all_features: false,
+                no_default_features: false,
                 already_in_bootloader: true,
             });
             assert_eq!(result.is_ok(), succeeds, "{result:?}");

@@ -27,11 +27,10 @@ over CAN to the ECU's custom bootloader and reports firmware update progress.
 Before flashing, make sure [Ajax](https://github.com/Northeastern-Electric-Racing/Ajax)
 is running in server mode on the TPU.
 
-Build the application, then run `can flash` from its project directory with Ajax's
-URL, including scheme and port:
+Run `can flash` from the project directory with the CAN flashing server's URL,
+including scheme and port. It builds the release binary first, then flashes it:
 
 ```sh
-cargo build --release
 can flash --host http://<server>:<port>
 ```
 
@@ -43,13 +42,17 @@ ecu = "<ecu>"
 ```
 
 The name must match an ECU in Odyssey-Definitions’ `can-bootloader/ecus.json`.
-It flashes the release ELF from the Cargo target directory, so build with
-`--release` first.
 
 From a workspace root, select the project with `-p`:
 
 ```sh
 can flash --host <url> -p <package>
+```
+
+Pass features the same way as to `cargo build`:
+
+```sh
+can flash --host <url> --features <feature>
 ```
 
 To flash an ELF outside a Cargo project, pass both the file and the ECU:
