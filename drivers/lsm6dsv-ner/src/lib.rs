@@ -8,8 +8,9 @@
 // found from c files for this driver (imp for sensor fusion: Embedded sensor fusion low-power algorithm)
 
 use embedded_hal_async::{delay::DelayNs, spi::SpiDevice};
-use lsm6dsv_rs::asynchronous::driver::{self as st, Lsm6dsv as StLsm6dsv};
-use lsm6dsv_rs::asynchronous::register::main::{GyFullScale, Odr, Reset, XlFullScale};
+use lsm6dsv16x_rs::asynchronous::driver::{self as st, Lsm6dsv16x as StLsm6dsv};
+use lsm6dsv16x_rs::asynchronous::register::MainBank;
+use lsm6dsv16x_rs::asynchronous::register::main::{GyFullScale, Odr, Reset, XlFullScale};
 use st_mems_bus::asynchronous::spi::SpiBus;
 
 /// wait after a software reset before talking to the sensor again, Turn-on time - gyroscope - 30ms from datasheet
@@ -45,6 +46,7 @@ pub enum GyroRange {
 }
 
 /// Output data rate, used for both the accelerometer and the gyroscope.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, defmt::Format)]
 pub enum DataRate {
     Hz1_875,
@@ -62,7 +64,7 @@ pub enum DataRate {
 }
 
 /// config
-#[derive(Debug, Clone, Copy, Default, defmt::Format)]
+#[derive(Debug, Clone, Copy, defmt::Format)]
 pub struct Config {
     pub accel_range: AccelRange,
     pub gyro_range: GyroRange,
@@ -74,8 +76,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             accel_range: AccelRange::G2,
-            gyro_range: GyroRange::Dps125, // Dps2000
-            data_rate: DataRate::Hz15,     // Hz120
+            gyro_range: GyroRange::Dps2000, // Dps2000
+            data_rate: DataRate::Hz120,     // Hz120
         }
     }
 }
@@ -100,7 +102,7 @@ pub struct ImuReading {
 /// LSM6DSV on an SPI bus.
 pub struct Lsm6dsv<SPI: SpiDevice, D: DelayNs> {
     // there's also a third parameter bank-state parameter register::MainBank
-    sensor: StLsm6dsv<SpiBus<SPI>, D>,
+    sensor: StLsm6dsv<SpiBus<SPI>, D, MainBank>,
     // Remembered so raw readings are converted using the right scale
     accel_range: AccelRange,
     gyro_range: GyroRange,
@@ -119,7 +121,7 @@ impl<SPI: SpiDevice, D: DelayNs> Lsm6dsv<SPI, D> {
 
     /// Sets the sensor up like `init_imu()` in c: check the ID, reset, block data
     /// update on, then apply `config` (ranges and data rate)
-    pub async fn init(&mut self) -> Result<(), Error> {
+    pub async fn init(&mut self, config: Config) -> Result<(), Error> {
         let id = self.sensor.device_id_get().await.map_err(|_| Error::Bus)?;
         if id != st::ID {
             return Err(Error::WrongId(id));
@@ -183,7 +185,7 @@ impl<SPI: SpiDevice, D: DelayNs> Lsm6dsv<SPI, D> {
     /// Sets the output data rate of both the accelerometer and the gyroscope
     pub async fn set_data_rate(&mut self, rate: DataRate) -> Result<(), Error> {
         // these variant names were in lsm6dsv16x-rs (Odr)
-        let odr = match range {
+        let odr = match rate {
             DataRate::Hz1_875 => Odr::_1_875hz,
             DataRate::Hz7_5 => Odr::_7_5hz,
             DataRate::Hz15 => Odr::_15hz,
@@ -251,7 +253,7 @@ impl<SPI: SpiDevice, D: DelayNs> Lsm6dsv<SPI, D> {
     }
 
     /// Direct access to ST's driver, for settings this wrapper doesn't expose [same as lis2mdl]
-    pub fn inner(&mut self) -> &mut StLsm6dsv<SpiBus<SPI>, D> {
+    pub fn inner(&mut self) -> &mut StLsm6dsv<SpiBus<SPI>, D, MainBank> {
         &mut self.sensor
     }
 }
