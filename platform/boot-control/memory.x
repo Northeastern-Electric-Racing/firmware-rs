@@ -6,3 +6,9 @@ MEMORY
   BOOTLOADER_STATE : ORIGIN = 0x081FA000, LENGTH = 0x2000
   RAM : ORIGIN = 0x20000000, LENGTH = 0xA0000
 }
+
+/* Partition offsets from the start of flash, read by embassy-boot. */
+__bootloader_state_start = ORIGIN(BOOTLOADER_STATE) - ORIGIN(BOOTLOADER);
+__bootloader_state_end = ORIGIN(BOOTLOADER_STATE) + LENGTH(BOOTLOADER_STATE) - ORIGIN(BOOTLOADER);
+__bootloader_dfu_start = ORIGIN(DFU) - ORIGIN(BOOTLOADER);
+__bootloader_dfu_end = ORIGIN(DFU) + LENGTH(DFU) - ORIGIN(BOOTLOADER);

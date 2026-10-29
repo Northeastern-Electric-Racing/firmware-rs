@@ -5,8 +5,7 @@
 
 use core::cell::RefCell;
 
-use embassy_boot::{AlignedBuffer, BlockingFirmwareState};
-use embassy_embedded_hal::flash::partition::BlockingPartition;
+use embassy_boot::{AlignedBuffer, BlockingFirmwareState, FirmwareUpdaterConfig};
 use embassy_stm32::Peri;
 use embassy_stm32::flash::{Blocking, Flash, WRITE_SIZE};
 use embassy_stm32::peripherals::FLASH;
@@ -16,11 +15,6 @@ use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 pub use embassy_boot::FirmwareUpdaterError;
 
 const BOOT_REQUEST_DATA: &[u8] = &[0xB0, 0x07, 0x10, 0xAD];
-
-// Reserve an 8 KiB boot-state sector at 0x081FA000 in the bootloader layout.
-// Offsets below are relative to the start of flash.
-const STATE_OFFSET: u32 = 0x001F_A000;
-const STATE_SIZE: u32 = 0x2000;
 
 /// Own flash access for startup confirmation and persistent bootloader requests.
 pub struct Bootloader<'d> {
@@ -53,11 +47,12 @@ impl<'d> Bootloader<'d> {
         Ok(())
     }
 
-    // Construct the short-lived partition and aligned buffer without self-references.
+    // Read the partitions from the linker symbols in memory.x on each write,
+    // so the state does not borrow from self.
     fn write_state(&mut self, detach: bool) -> Result<(), FirmwareUpdaterError> {
-        let partition = BlockingPartition::new(&self.flash, STATE_OFFSET, STATE_SIZE);
+        let config = FirmwareUpdaterConfig::from_linkerfile_blocking(&self.flash, &self.flash);
         let mut aligned = AlignedBuffer([0; WRITE_SIZE]);
-        let mut state = BlockingFirmwareState::new(partition, aligned.as_mut());
+        let mut state = BlockingFirmwareState::from_config(config, aligned.as_mut());
         if detach {
             state.mark_dfu()
         } else {
