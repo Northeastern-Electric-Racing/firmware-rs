@@ -55,6 +55,13 @@ ignored. Perform any application-specific shutdown before calling `handle_reques
 
 ## Memory layout
 
+`boot-control`'s `memory.x` divides flash into these regions:
+
+- `BOOTLOADER`: the bootloader.
+- `FLASH`: the running application.
+- `DFU`: new firmware staged by the bootloader until it is swapped into `FLASH`.
+- `BOOTLOADER_STATE`: boot and update flags shared by the bootloader and the application.
+
 Applications must link with the layout provided by `boot-control`, which matches the
 bootloader. `boot-control` exports its `memory.x` path through Cargo build metadata as
 `DEP_BOOT_CONTROL_MEMORY_X`. Copy it in the application's `build.rs`:
