@@ -1,3 +1,5 @@
+//! can-flash-cli: command-line tool for flashing application firmware onto an ECU over CAN.
+
 use std::{
     fs::File,
     io::{self, BufRead, BufReader, IsTerminal, Read, Write},
@@ -53,7 +55,8 @@ struct CanFlash {
 // Keep above the server's 60 s upload limit so its error is reported instead.
 const SERVER_TIMEOUT: Duration = Duration::from_secs(120);
 
-fn cargo_json(arguments: &[&str]) -> Result<serde_json::Value> {
+/// Reads project information from Cargo, such as package metadata, as JSON.
+fn read_cargo_info(arguments: &[&str]) -> Result<serde_json::Value> {
     let output = std::process::Command::new("cargo")
         .args(arguments)
         .output()
@@ -66,15 +69,17 @@ fn cargo_json(arguments: &[&str]) -> Result<serde_json::Value> {
     serde_json::from_slice(&output.stdout).context("invalid Cargo metadata")
 }
 
+/// Finds the package to flash: `-p`, the current directory, or the only workspace member.
 fn find_package(package_name: Option<&str>) -> Result<serde_json::Value> {
-    let metadata = cargo_json(&[
+    // Load the workspace packages.
+    let metadata = read_cargo_info(&[
         "metadata",
         "--no-deps",
         "--offline",
         "--format-version",
         "1",
     ])?;
-    let current = cargo_json(&["locate-project", "--message-format", "json"])?;
+    let current = read_cargo_info(&["locate-project", "--message-format", "json"])?;
     let packages = metadata["packages"]
         .as_array()
         .context("Cargo returned no packages")?;
@@ -85,6 +90,7 @@ fn find_package(package_name: Option<&str>) -> Result<serde_json::Value> {
         .iter()
         .filter(|p| members.contains(&p["id"]))
         .collect();
+    // Pick the package to flash.
     let package = if let Some(name) = package_name {
         workspace_packages
             .iter()
@@ -105,8 +111,9 @@ fn find_package(package_name: Option<&str>) -> Result<serde_json::Value> {
     Ok(package.clone())
 }
 
-/// Build the package's release binary and return the built ELF.
+/// Builds the package's release binary and returns the built ELF.
 fn build_elf(package: &serde_json::Value, args: &CanFlash) -> Result<PathBuf> {
+    // Build the release binary.
     let name = package["name"].as_str().context("package has no name")?;
     let mut command = std::process::Command::new("cargo");
     command.args([
@@ -126,6 +133,7 @@ fn build_elf(package: &serde_json::Value, args: &CanFlash) -> Result<PathBuf> {
         .context("cannot run Cargo; supply --elf and --ecu to flash without building")?;
     ensure!(output.status.success(), "build failed");
 
+    // Find the built ELF.
     let mut binaries = Vec::new();
     for line in output.stdout.split(|&b| b == b'\n') {
         let Ok(message) = serde_json::from_slice::<serde_json::Value>(line) else {
@@ -147,7 +155,8 @@ fn build_elf(package: &serde_json::Value, args: &CanFlash) -> Result<PathBuf> {
     }
 }
 
-fn endpoint(mut base: Url) -> Result<Url> {
+/// Validates the server URL and returns its `/flash` endpoint.
+fn build_flash_url(mut base: Url) -> Result<Url> {
     ensure!(
         matches!(base.scheme(), "http" | "https") && base.host_str().is_some(),
         "--host must be an http:// or https:// server URL"
@@ -164,7 +173,9 @@ fn endpoint(mut base: Url) -> Result<Url> {
     Ok(base)
 }
 
+/// Builds or selects the ELF, uploads it, and reports the result.
 fn flash(args: CanFlash) -> Result<()> {
+    // Find the ECU and the ELF.
     let project = if args.elf.is_none() || args.ecu.is_none() {
         Some(find_package(args.package.as_deref()).context(
             "cannot select application; use -p <package> or run from its directory; for an explicit ELF outside a project, also pass --ecu",
@@ -187,7 +198,8 @@ fn flash(args: CanFlash) -> Result<()> {
             build_elf(package, &args)?
         }
     };
-    let url = endpoint(args.host)?;
+    // Check the ELF and upload it.
+    let url = build_flash_url(args.host)?;
     let mut file = File::open(&elf).with_context(|| format!("cannot open {}", elf.display()))?;
     ensure!(file.metadata()?.is_file(), "--elf must be a regular file");
     let mut magic = [0; 4];
@@ -223,6 +235,7 @@ fn flash(args: CanFlash) -> Result<()> {
         "Server request failed; the ECU may still be flashing. Check server status before retrying",
     )?;
     let status = response.status();
+    // Show the server's progress or reply.
     let streaming = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -245,7 +258,7 @@ fn flash(args: CanFlash) -> Result<()> {
             )
         })?;
     if status != StatusCode::OK {
-        bail!("{}", http_error_message(status, &body));
+        bail!("{}", describe_server_error(status, &body));
     }
     println!(
         "{}",
@@ -258,7 +271,8 @@ fn flash(args: CanFlash) -> Result<()> {
     Ok(())
 }
 
-fn http_error_message(status: StatusCode, body: &str) -> String {
+/// Describes a rejected reply using the server's error text, or the HTTP status if it sent none.
+fn describe_server_error(status: StatusCode, body: &str) -> String {
     let message = body.trim();
     if message.is_empty() {
         format!("HTTP {status}")
@@ -267,10 +281,12 @@ fn http_error_message(status: StatusCode, body: &str) -> String {
     }
 }
 
+/// Prints progress events from the server until the flash completes or fails.
 fn display_progress(response: impl Read, elf: &std::path::Path) -> Result<()> {
     let mut reader = BufReader::new(response);
     let terminal = io::stdout().is_terminal();
     loop {
+        // Read the next progress event.
         let mut line = String::new();
         let count = reader
             .by_ref()
@@ -310,6 +326,7 @@ fn display_progress(response: impl Read, elf: &std::path::Path) -> Result<()> {
                 );
                 let stage = event["stage"].as_str().context("missing progress stage")?;
                 let detail = event["detail"].as_str().unwrap_or("");
+                // Print the progress bar.
                 let filled = (percent / 100.0 * 24.0).round() as usize;
                 let bar = format!("{}{}", "#".repeat(filled), "-".repeat(24 - filled));
                 if terminal {
@@ -338,12 +355,14 @@ fn display_progress(response: impl Read, elf: &std::path::Path) -> Result<()> {
     }
 }
 
+/// Turns an error into a short message for the user; server messages pass through.
 fn format_error(error: &anyhow::Error) -> String {
     let details = format!("{error:#}").to_ascii_lowercase();
     let request = error
         .chain()
         .find_map(|cause| cause.downcast_ref::<reqwest::Error>());
 
+    // Map known errors to short messages.
     if details.contains("can interface is busy") || details.contains("http 409") {
         "Server is busy. Try again when the current operation finishes.".into()
     } else if details.contains("progress connection lost")
@@ -373,6 +392,7 @@ fn format_error(error: &anyhow::Error) -> String {
     }
 }
 
+/// Describes a network error from the HTTP client.
 fn request_error(error: &reqwest::Error, details: &str) -> &'static str {
     if error.is_connect()
         && (details.contains("dns")
@@ -392,6 +412,7 @@ fn request_error(error: &reqwest::Error, details: &str) -> &'static str {
 }
 
 fn main() -> ExitCode {
+    // Run `can flash` and print a short error message on failure.
     let Cli {
         command: Command::Flash(args),
     } = Cli::parse();
@@ -454,7 +475,7 @@ mod tests {
     #[test]
     fn server_url_validation() {
         assert_eq!(
-            endpoint(Url::parse("http://localhost:8080/api/").unwrap())
+            build_flash_url(Url::parse("http://localhost:8080/api/").unwrap())
                 .unwrap()
                 .as_str(),
             "http://localhost:8080/api/flash"
@@ -464,7 +485,7 @@ mod tests {
             "http://user:pass@localhost",
             "http://localhost/?x=1",
         ] {
-            assert!(endpoint(Url::parse(url).unwrap()).is_err());
+            assert!(build_flash_url(Url::parse(url).unwrap()).is_err());
         }
     }
 
@@ -492,7 +513,7 @@ mod tests {
                 "HTTP 500 Internal Server Error",
             ),
         ] {
-            assert_eq!(http_error_message(status, body), expected);
+            assert_eq!(describe_server_error(status, body), expected);
         }
     }
 
