@@ -2,8 +2,8 @@
 members = ["drivers/*", "platform/*", "utilities/*"]
 resolver = "3"
 
-# for some reason cargo is too dumb to build a macro for host
-exclude = ["utilities/cangen/cangen-macro"]
+# Keep standalone host tools outside embedded workspace builds.
+exclude = ["utilities/cangen/cangen-macro", "utilities/can-flash-cli", "utilities/can-bootloader-config"]
 
 [workspace.dependencies]
 defmt = "1"
