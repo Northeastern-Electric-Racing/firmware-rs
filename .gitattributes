@@ -1,0 +1,2 @@
+# Shell scripts must retain Unix line endings for Bash and Zsh.
+*.sh text eol=lf

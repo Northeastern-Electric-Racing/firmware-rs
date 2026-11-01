@@ -1,0 +1,18 @@
+[package]
+name = "can-flash-cli"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Host tool, separate from the embedded workspace.
+[workspace]
+
+[[bin]]
+name = "can"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "multipart", "rustls-tls"] }
+serde_json = "1"

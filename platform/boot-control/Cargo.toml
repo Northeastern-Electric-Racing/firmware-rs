@@ -1,0 +1,15 @@
+[package]
+name = "boot-control"
+version = "0.1.0"
+edition = "2024"
+publish = false
+links = "boot_control"
+
+[dependencies]
+cortex-m = "0.7"
+embassy-boot = "0.7.0"
+embassy-stm32 = { workspace = true, features = ["dual-bank"] }
+embassy-sync = "0.8.0"
+
+[lints]
+workspace = true
