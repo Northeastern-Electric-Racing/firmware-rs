@@ -109,6 +109,43 @@ pub struct PwmA {
 
     #[bits(16, default = 0)]                                  _padding: u16,
 }
+impl PwmA {
+    /// Creates a new `PwmA` with all cells configured for `PwmDutyCycleConfig::Disabled`.
+    pub const fn all_disabled() -> Self {
+        use types::PwmDutyCycleConfig;
+
+        Self::new()
+        .with_pwm1(PwmDutyCycleConfig::Disabled)
+        .with_pwm2(PwmDutyCycleConfig::Disabled)
+        .with_pwm3(PwmDutyCycleConfig::Disabled)
+        .with_pwm4(PwmDutyCycleConfig::Disabled)
+        .with_pwm5(PwmDutyCycleConfig::Disabled)
+        .with_pwm6(PwmDutyCycleConfig::Disabled)
+        .with_pwm7(PwmDutyCycleConfig::Disabled)
+        .with_pwm8(PwmDutyCycleConfig::Disabled)
+        .with_pwm9(PwmDutyCycleConfig::Disabled)
+        .with_pwm10(PwmDutyCycleConfig::Disabled)
+        .with_pwm11(PwmDutyCycleConfig::Disabled)
+        .with_pwm12(PwmDutyCycleConfig::Disabled)
+    }
+
+    /// Creates a new `PwmA` with all cells configured to `config`.
+    pub const fn for_all(config: types::PwmDutyCycleConfig) -> Self {
+        Self::new()
+        .with_pwm1(config)
+        .with_pwm2(config)
+        .with_pwm3(config)
+        .with_pwm4(config)
+        .with_pwm5(config)
+        .with_pwm6(config)
+        .with_pwm7(config)
+        .with_pwm8(config)
+        .with_pwm9(config)
+        .with_pwm10(config)
+        .with_pwm11(config)
+        .with_pwm12(config)
+    }
+}
 
 /// PWM Register Group B (PWMB). Contains six 1-byte registers (so 6 bytes total), but the last 4 bytes are reserved (constant 1s).
 /// 
@@ -138,4 +175,25 @@ pub struct PwmB {
     #[bits(8, default = 0xFF)]                                _psr5: u8,
 
     #[bits(16, default = 0)]                                  _padding: u16,
+}
+impl PwmB {
+    /// Creates a new `PwmB` with all cells configured for `PwmDutyCycleConfig::Disabled`.
+    pub const fn all_disabled() -> Self {
+        use types::PwmDutyCycleConfig;
+
+        Self::new()
+        .with_pwm13(PwmDutyCycleConfig::Disabled)
+        .with_pwm14(PwmDutyCycleConfig::Disabled)
+        .with_pwm15(PwmDutyCycleConfig::Disabled)
+        .with_pwm16(PwmDutyCycleConfig::Disabled)
+    }
+
+    /// Creates a new `PwmB` with all cells configured to `config`.
+    pub const fn for_all(config: types::PwmDutyCycleConfig) -> Self {
+        Self::new()
+        .with_pwm13(config)
+        .with_pwm14(config)
+        .with_pwm15(config)
+        .with_pwm16(config)
+    }
 }
