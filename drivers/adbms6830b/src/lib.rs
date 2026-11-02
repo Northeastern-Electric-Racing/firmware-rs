@@ -22,5 +22,6 @@ pub mod chip;
 pub mod turnkey;
 #[rustfmt::skip]
 pub mod line;
+pub mod spi_timing;
 #[rustfmt::skip]
 mod docs;

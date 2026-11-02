@@ -1,38 +1,19 @@
-//! Transport for a single ADBMS2950B.
+//! SPI transport for one isoSPI line to an ADBMS2950B.
 //!
-//! This is the layer that actually talks to the chip: it frames commands, appends and verifies
-//! the data PEC, extracts the command counter, and waits out the datasheet's conversion times.
-//! Everything it sends and decodes is built from [`crate::chip`].
+//! The chip has two isoSPI ports onto the same die, so "line" is one of those two connections --
+//! [`crate::api::Api`] holds both and fails over between them.
 //!
-//! ### Most applications want [`crate::api`] instead
+//! Frames a command, appends and verifies the data PEC, extracts the command counter, and holds
+//! the bus idle for t5. Anything deciding *what* to send is policy and lives in [`crate::api`].
 //!
-//! A `Line` is stateless. It will happily send a command and forget it happened, which means
-//! anything that has to be remembered *between* transactions is left to you: the command
-//! counter, PEC tallies, the cached configuration, which line is active. [`crate::api::Api`]
-//! keeps all of that, and reimplementing it per-application is how it ends up subtly wrong.
-//!
-//! You cannot hold both for the same device -- [`crate::api::Api::new`] takes its lines by
-//! value -- so this is a choice made once at construction, not a thing to get wrong later.
-//!
-//! Reaching for `Line` directly is the right call when:
-//!
-//! - **You are bringing up hardware.** Sending one command and looking at the bytes is easier
-//!   without a layer maintaining invariants around it.
-//! - **You want a different policy than [`crate::api`] implements.** `Api` is itself just a
-//!   `Line` plus bookkeeping; if you need different failover or counter semantics, build your
-//!   own on this rather than fighting it.
-//! - **You are writing tests.** A `Line<MockSpi>` is much less to stand up than a full `Api`.
-//! - **You genuinely want no state.** A one-shot read at startup does not need a counter.
+//! Private, because `Api` owns its lines. Its public types are re-exported from [`crate::api`].
 
 use embedded_hal_async::spi::{Operation, SpiDevice};
 
-use crate::chip::commands;
-use crate::chip::commands::{
-    CommandFrame,
-    adc::{Acquisition, Diagnostic, OpenWire, OpenWireVoltage, Redundancy, VoltageChannel},
-};
+use crate::chip::commands::CommandFrame;
 use crate::chip::pec::{DataPecRx, DataPecTx};
 use crate::chip::registers::{GROUP_BYTES, ReadableGroup, WritableGroup};
+use crate::spi_timing::BusIdle;
 
 /// Wire length of one register group plus its data PEC.
 const BLOCK_BYTES: usize = GROUP_BYTES + 2;
@@ -93,36 +74,46 @@ pub struct Response<G> {
 
 /// One ADBMS2950B on a SPI or isoSPI link.
 ///
-/// `SPI` is an [`SpiDevice`], not a bus, so chip-select handling and inter-operation delays come
-/// from the device implementation rather than being managed here.
+/// Chip select belongs to the `SpiDevice`, so t6 and t7 do too; t5 is the one this can enforce,
+/// and `DELAY` is what it enforces it with. See [`crate::spi_timing`].
 ///
-/// **The `SpiDevice` must support [`Operation::DelayNs`]**, because the wake-up pulse before every transaction generates it
-/// pulse by running a delay-only transaction. With `embedded-hal-bus` that means
-/// `ExclusiveDevice::new(...)` with a real delay, not `ExclusiveDevice::new_no_delay(...)`, which
-/// panics on a delay operation.
-pub struct Line<SPI> {
+/// **The `SpiDevice` must support [`Operation::DelayNs`]**, because the wake-up pulse is a
+/// delay-only transaction. `ExclusiveDevice::new_no_delay(...)` panics on one.
+pub struct Line<SPI, DELAY> {
     spi: SPI,
+    delay: DELAY,
 }
 
-impl<SPI: SpiDevice> Line<SPI> {
-    /// Wraps an [`SpiDevice`].
-    pub const fn new(spi: SPI) -> Self {
-        Self { spi }
+impl<SPI: SpiDevice, DELAY: BusIdle> Line<SPI, DELAY> {
+    /// Wraps an [`SpiDevice`] and the delay used to honour t5.
+    pub const fn new(spi: SPI, delay: DELAY) -> Self {
+        Self { spi, delay }
     }
 
-    /// Returns the underlying device.
-    pub fn release(self) -> SPI {
-        self.spi
+    /// Returns the underlying device and delay.
+    pub fn release(self) -> (SPI, DELAY) {
+        (self.spi, self.delay)
+    }
+
+    /// Runs one transaction, then holds the bus idle for t5.
+    ///
+    /// Every bus access routes through here, so t5 covers the wake pulse and back-to-back reads
+    /// alike. Unconditional rather than measured, and on the error path too, since chip select
+    /// was released either way.
+    async fn transact(
+        &mut self,
+        operations: &mut [Operation<'_, u8>],
+    ) -> Result<(), Error<SPI::Error>> {
+        let result = self.spi.transaction(operations).await.map_err(Error::Spi);
+        self.delay.idle();
+        result
     }
 
     /// Sends a command with no data payload.
     pub async fn command(&mut self, frame: CommandFrame) -> Result<(), Error<SPI::Error>> {
         let bytes = frame.to_bytes();
         self.pulse().await?;
-        self.spi
-            .transaction(&mut [Operation::Write(&bytes)])
-            .await
-            .map_err(Error::Spi)
+        self.transact(&mut [Operation::Write(&bytes)]).await
     }
 
     /// Reads a register group.
@@ -135,10 +126,8 @@ impl<SPI: SpiDevice> Line<SPI> {
         let mut block = [0u8; BLOCK_BYTES];
 
         self.pulse().await?;
-        self.spi
-            .transaction(&mut [Operation::Write(&command), Operation::Read(&mut block)])
-            .await
-            .map_err(Error::Spi)?;
+        self.transact(&mut [Operation::Write(&command), Operation::Read(&mut block)])
+            .await?;
 
         let data: [u8; GROUP_BYTES] = {
             let mut out = [0u8; GROUP_BYTES];
@@ -174,10 +163,8 @@ impl<SPI: SpiDevice> Line<SPI> {
         block[GROUP_BYTES + 1] = pec.pec1();
 
         self.pulse().await?;
-        self.spi
-            .transaction(&mut [Operation::Write(&command), Operation::Write(&block)])
+        self.transact(&mut [Operation::Write(&command), Operation::Write(&block)])
             .await
-            .map_err(Error::Spi)
     }
 
     /// Sends a poll command once and reports whether the conversion has finished.
@@ -193,37 +180,10 @@ impl<SPI: SpiDevice> Line<SPI> {
         let mut status = [0u8; 2];
 
         self.pulse().await?;
-        self.spi
-            .transaction(&mut [Operation::Write(&command), Operation::Read(&mut status)])
-            .await
-            .map_err(Error::Spi)?;
+        self.transact(&mut [Operation::Write(&command), Operation::Read(&mut status)])
+            .await?;
 
         Ok(status[1] == 0xFF)
-    }
-
-    /// Polls until a conversion finishes, or gives up.
-    ///
-    /// Waits `settle` first, since polling before the conversion could possibly be done is just
-    /// wasted bus traffic, then polls every millisecond until `timeout` elapses. The sensible
-    /// `settle` values are in [`conversion_times`].
-    pub async fn poll_until(
-        &mut self,
-        frame: CommandFrame,
-        settle: embassy_time::Duration,
-        timeout: embassy_time::Duration,
-    ) -> Result<(), Error<SPI::Error>> {
-        embassy_time::Timer::after(settle).await;
-
-        let deadline = embassy_time::Instant::now() + timeout;
-        loop {
-            if self.poll(frame).await? {
-                return Ok(());
-            }
-            if embassy_time::Instant::now() >= deadline {
-                return Err(Error::Timeout);
-            }
-            embassy_time::Timer::after(embassy_time::Duration::from_millis(1)).await;
-        }
     }
 
     /// Sends a wake-up pulse and waits out the regulator startup time.
@@ -238,153 +198,13 @@ impl<SPI: SpiDevice> Line<SPI> {
         self.pulse().await
     }
 
-    /// Waits out the regulator startup time, `tWAKE`.
-    ///
-    /// Owed after power-up or an `SRST`, and **not** something an ordinary transaction needs --
-    /// this is a 500 us wait, versus the ~4 us [`Line::wakeup`] pulse. After this the chip is in
-    /// STANDBY and accepting commands; it then reaches REFUP on its own, which
-    /// [`Line::wait_for_reference`] detects.
-    pub async fn wait_after_reset(&mut self) {
-        embassy_time::Timer::after(embassy_time::Duration::from_micros(
-            conversion_times::WAKE_MAX_US as u64,
-        ))
-        .await;
-    }
-
     /// Generates one chip-select pulse to wake the line.
     ///
     /// Called before every bus access, matching what the vendor reference code does. Costs about
     /// 4 us for a single device.
     async fn pulse(&mut self) -> Result<(), Error<SPI::Error>> {
-        self.spi
-            .transaction(&mut [Operation::DelayNs(conversion_times::WAKE_PULSE_US * 1_000)])
+        self.transact(&mut [Operation::DelayNs(conversion_times::WAKE_PULSE_US * 1_000)])
             .await
-            .map_err(Error::Spi)
-    }
-
-    /// Waits for the voltage references to come up, by polling the `REFUP` bit in CFGA.
-    ///
-    /// After power-up or an `SRST` the chip passes through STANDBY into REFUP on its own; this is
-    /// how you find out it has arrived. Measurements taken before this are not trustworthy.
-    pub async fn wait_for_reference(&mut self) -> Result<(), Error<SPI::Error>> {
-        use crate::chip::registers::config_a::{ConfigA, types::ReferencePowered};
-
-        let deadline = embassy_time::Instant::now()
-            + embassy_time::Duration::from_millis(conversion_times::REFUP_MAX_MS as u64 * 2);
-
-        loop {
-            if let Ok(response) = self.read::<ConfigA>().await
-                && response.data.refup() == ReferencePowered::Powered
-            {
-                return Ok(());
-            }
-            if embassy_time::Instant::now() >= deadline {
-                return Err(Error::Timeout);
-            }
-            embassy_time::Timer::after(embassy_time::Duration::from_micros(500)).await;
-        }
-    }
-
-    /// Confirms the attached device is an ADBMS2950B, returning its serial ID.
-    ///
-    /// Reads `RDSID` and checks the `DEVID` bits. Useful as a presence check
-    pub async fn detect(
-        &mut self,
-    ) -> Result<crate::chip::registers::serial_id::SerialId, Error<SPI::Error>> {
-        use crate::chip::registers::serial_id::SerialId;
-
-        let response = self.read::<SerialId>().await?;
-        if !response.data.is_adbms2950b() {
-            return Err(Error::WrongDevice(response.data.device_id()));
-        }
-        Ok(response.data)
-    }
-
-    /// Starts an I1ADC conversion and waits for it to finish.
-    ///
-    /// Always a single-shot conversion: a continuous one never reports completion, so there
-    /// would be nothing to poll. To run continuously, send
-    /// [`crate::chip::commands::adc::adi1`] yourself with [`Acquisition::Continuous`] and track
-    /// progress through the FLAG register's `i1pha`/`i1cnt` counters instead.
-    ///
-    /// The settle wait is `tIxADC_STARTUP`, which is what the *first* conversion after power-up
-    /// or `SRST` costs. Subsequent conversions finish in about
-    /// [`conversion_times::IXADC_CONVERSION_MS`], so polling simply returns on the first try.
-    pub async fn adi1_autoconvert(
-        &mut self,
-        rd: Redundancy,
-        diag: Diagnostic,
-        ow: OpenWire,
-        timeout: embassy_time::Duration,
-    ) -> Result<(), Error<SPI::Error>> {
-        let start = commands::adc::adi1(rd, Acquisition::SingleShot, diag, ow).frame();
-        self.command(start).await?;
-        self.poll_until(
-            commands::poll::pli1().frame(),
-            embassy_time::Duration::from_millis(conversion_times::IXADC_STARTUP_MAX_MS as u64),
-            timeout,
-        )
-        .await
-    }
-
-    /// Starts an I2ADC conversion and waits for it to finish.
-    ///
-    /// Single-shot only, for the same reason as [`Line::adi1_autoconvert`]. The second current
-    /// channel is independent of the first, so this has no redundancy parameter.
-    pub async fn adi2_autoconvert(
-        &mut self,
-        diag: Diagnostic,
-        ow: OpenWire,
-        timeout: embassy_time::Duration,
-    ) -> Result<(), Error<SPI::Error>> {
-        let start = commands::adc::adi2(Acquisition::SingleShot, diag, ow).frame();
-        self.command(start).await?;
-        self.poll_until(
-            commands::poll::pli2().frame(),
-            embassy_time::Duration::from_millis(conversion_times::IXADC_STARTUP_MAX_MS as u64),
-            timeout,
-        )
-        .await
-    }
-
-    /// Starts a V1ADC/V2ADC conversion and waits for it to finish.
-    ///
-    /// The settle wait scales with how many channels `vch` sweeps, since a round robin converts
-    /// them one after another. **Any `SOAK` time configured in CFGA is added by the chip on top
-    /// of this** and is not accounted for here -- if you enable soak, widen `timeout` to match.
-    pub async fn adv_autoconvert(
-        &mut self,
-        ow: OpenWireVoltage,
-        vch: VoltageChannel,
-        timeout: embassy_time::Duration,
-    ) -> Result<(), Error<SPI::Error>> {
-        let start = commands::adc::adv(ow, vch).frame();
-        let settle_us =
-            conversion_times::VADC_CONVERSION_MAX_US as u64 * vch.channel_count() as u64;
-        self.command(start).await?;
-        self.poll_until(
-            commands::poll::plv().frame(),
-            embassy_time::Duration::from_micros(settle_us),
-            timeout,
-        )
-        .await
-    }
-
-    /// Starts an AUX ADC conversion and waits for it to finish.
-    ///
-    /// The AUX ADC sweeps its whole set of internal rails and both temperature sensors, so
-    /// unlike [`Line::adv_autoconvert`] there is nothing to select.
-    pub async fn adx_autoconvert(
-        &mut self,
-        timeout: embassy_time::Duration,
-    ) -> Result<(), Error<SPI::Error>> {
-        self.command(commands::adc::adx().frame()).await?;
-        self.poll_until(
-            commands::poll::plx().frame(),
-            embassy_time::Duration::from_micros(conversion_times::VADC_CONVERSION_MAX_US as u64),
-            timeout,
-        )
-        .await
     }
 }
 

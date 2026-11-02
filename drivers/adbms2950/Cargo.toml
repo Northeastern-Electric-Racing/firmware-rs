@@ -11,6 +11,7 @@ defmt = ["dep:defmt", "embassy-time/defmt", "embedded-hal-async/defmt-03"]
 [dependencies]
 bitfield-struct.workspace = true
 defmt = { workspace = true, optional = true }
+embedded-hal.workspace = true
 embedded-hal-async.workspace = true
 embassy-time.workspace = true
 adbms-register-macros = { path = "../adbms-register-macros" }

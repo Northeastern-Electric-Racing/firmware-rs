@@ -1,5 +1,6 @@
 //! Module representing a single Line of daisy-chained devices
 
+use crate::spi_timing::BusIdle;
 use embedded_hal_async::spi::{Operation, SpiDevice};
 
 use crate::chip::commands::{self, Command, CommandFrame};
@@ -214,29 +215,36 @@ impl<G, const N: usize> defmt::Format for Responses<G, N> {
 ///
 /// Index `0` is the device nearest this end of the line.
 #[doc = docs::isospi_indexing_example!()]
-pub struct Line<SPI, const N: usize> {
+pub struct Line<SPI, DELAY, const N: usize> {
     spi: SPI,
+    delay: DELAY,
     last_activity: embassy_time::Instant,
 }
 
 #[cfg(feature = "defmt")]
-impl<SPI, const N: usize> defmt::Format for Line<SPI, N> {
+impl<SPI, DELAY, const N: usize> defmt::Format for Line<SPI, DELAY, N> {
     fn format(&self, f: defmt::Formatter) {
         defmt::write!(f, "Line {{ max_chips: {=usize} }}", N)
     }
 }
 
-impl<SPI: SpiDevice, const N: usize> Line<SPI, N> {
+impl<SPI: SpiDevice, DELAY: BusIdle, const N: usize> Line<SPI, DELAY, N> {
     /// Builds a line on `spi`.
     /// 
-    /// WARNING: The SpiDevice must support DelayNs, or else this will panic whenever you attempt to send a transaction. For example, don't use `ExclusiveDevice::new_no_delay()`.
-    pub const fn new(spi: SPI) -> Self {
-        Self { spi, last_activity: embassy_time::Instant::from_ticks(0) }
+    /// `delay` is what t5 is made of -- see [`crate::spi_timing`].
+    pub const fn new(spi: SPI, delay: DELAY) -> Self {
+        Self { spi, delay, last_activity: embassy_time::Instant::from_ticks(0) }
     }
 
-    /// Releases the underlying SPI device.
-    pub fn release(self) -> SPI {
-        self.spi
+    /// Releases the underlying SPI device and delay.
+    pub fn release(self) -> (SPI, DELAY) {
+        (self.spi, self.delay)
+    }
+
+    /// Holds the bus idle for t5. Unconditional rather than measured, and on the error path
+    /// too, since chip select was released either way.
+    fn idle_for_t5(&mut self) {
+        self.delay.idle();
     }
 
     /// PRIVATE!
@@ -265,6 +273,8 @@ impl<SPI: SpiDevice, const N: usize> Line<SPI, N> {
             None => self.spi.transaction(&mut [Operation::Write(&bytes)]).await,
         }
         .map_err(Error::Spi);
+
+        self.idle_for_t5();
 
         if err.is_ok() {
             self.last_activity = embassy_time::Instant::now();
@@ -384,9 +394,11 @@ impl<SPI: SpiDevice, const N: usize> Line<SPI, N> {
     async fn pulse_line(&mut self, count: usize, gap_us: u32) -> Result<(), Error<SPI::Error>> {
         use embedded_hal_async::spi::{Operation};
         for _ in 0..count {
-            self.spi.transaction(&mut [
+            let result = self.spi.transaction(&mut [
                 Operation::DelayNs(gap_us * 1000),
-            ]).await.map_err(Error::Spi)?;
+            ]).await.map_err(Error::Spi);
+            self.idle_for_t5();
+            result?;
         }
 
         Ok(())
