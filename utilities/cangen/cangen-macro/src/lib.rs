@@ -98,31 +98,45 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
             #( #layouts #names(#names), )*
         }
 
+        /// Why a frame couldn't be decoded.
+        #[derive(Clone, Copy, Debug)]
+        pub enum DecodeError {
+            RemoteFrame(Id),
+            UnknownId(Id),
+            BadLength(Id),
+        }
+
         impl Msg {
+            /// The CAN ID of this message.
             #[inline]
-            pub fn decode<F: Frame>(frame: &F) -> Option<Self> {
+            pub const fn id(&self) -> Id {
+                match self {
+                    #( Msg::#names(_) => <#names as CanMessage>::ID, )*
+                }
+            }
+
+            #[inline]
+            pub fn decode<F: Frame>(frame: &F) -> Result<Self, DecodeError> {
                 if frame.is_remote_frame() {
-                    return None;
+                    return Err(DecodeError::RemoteFrame(frame.id()));
                 }
                 Self::decode_raw(frame.id(), frame.data())
             }
 
-            pub fn decode_raw(id: Id, data: &[u8]) -> Option<Self> {
+            pub fn decode_raw(id: Id, data: &[u8]) -> Result<Self, DecodeError> {
                 let key = match id {
                     Id::Standard(s) => (false, s.as_raw() as u32),
                     Id::Extended(e) => (true, e.as_raw()),
                 };
                 let (len, repr_bytes) = match key {
                     #( #layout_arms )*
-                    _ => return None,
+                    _ => return Err(DecodeError::UnknownId(id)),
                 };
-                let raw = match conv::read_be(data, len, repr_bytes) {
-                    Some(raw) => raw,
-                    None => return None,
-                };
-                Some(match key {
+                let raw = conv::read_be(data, len, repr_bytes)
+                    .ok_or(DecodeError::BadLength(id))?;
+                Ok(match key {
                     #( #build_arms )*
-                    _ => return None,
+                    _ => return Err(DecodeError::UnknownId(id)),
                 })
             }
         }
@@ -573,7 +587,6 @@ fn build_struct(msg: CANMsg) -> proc_macro2::TokenStream {
             const ID: Id = #id_decl;
         }
         impl ToCanFrame for #struct_name {}
-        impl FromCanFrame for #struct_name {}
     };
 
     // Range-validating accessors for the saturating (scaled `f32`) fields.
