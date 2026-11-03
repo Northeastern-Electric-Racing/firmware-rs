@@ -7,12 +7,11 @@ edition = "2024"
 defmt = { workspace = true, optional = true }
 embedded-hal.workspace = true
 embedded-hal-async.workspace = true
-embedded-storage-async = { version = "0.4.2", optional = true }
-m24xx-ner-macros = { path = "./m24xx-ner-macros", optional = true }
+embedded-storage-async = "0.4.2"
+m24xx-ner-macros = { path = "./m24xx-ner-macros" }
 
 [features]
-default = ["storage", "defmt"]
-storage = ["dep:embedded-storage-async", "dep:m24xx-ner-macros"]
+default = ["defmt"]
 defmt = ["dep:defmt"]
 
 [lints]
