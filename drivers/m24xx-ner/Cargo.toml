@@ -4,18 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-# Optional, so a build without defmt's linker script can still use this crate.
 defmt = { workspace = true, optional = true }
 embedded-hal.workspace = true
-embedded-hal-async = { workspace = true, optional = true }
-embedded-storage = { version = "0.3", optional = true }
+embedded-hal-async.workspace = true
 embedded-storage-async = { version = "0.4.2", optional = true }
+m24xx-ner-macros = { path = "./m24xx-ner-macros", optional = true }
 
 [features]
-default = ["sync", "async", "storage", "defmt"]
-sync = []
-async = ["dep:embedded-hal-async"]
-storage = ["dep:embedded-storage", "dep:embedded-storage-async"]
+default = ["storage", "defmt"]
+storage = ["dep:embedded-storage-async", "dep:m24xx-ner-macros"]
 defmt = ["dep:defmt"]
 
 [lints]
