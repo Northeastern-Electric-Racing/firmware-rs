@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-cangen = { git = "https://github.com/Northeastern-Electric-Racing/firmware-rs.git", rev = "2226d9a858cc40f3be02ec79a9a070f300b390af" }
+cangen = { git = "https://github.com/Northeastern-Electric-Racing/firmware-rs.git", branch = "develop" }
+ner-can = { package = "can-handler", git = "https://github.com/Northeastern-Electric-Racing/firmware-rs.git", branch="develop"}
 defmt.workspace = true
 embassy-embedded-hal.workspace = true
 embassy-executor.workspace = true
