@@ -13,18 +13,12 @@ use embedded_hal::i2c::{Error as _, ErrorKind, Operation};
 pub use embedded_hal_async::delay::DelayNs;
 pub use embedded_hal_async::i2c::I2c;
 
-#[cfg(feature = "storage")]
 mod double_buffer;
-#[cfg(feature = "storage")]
 mod raw;
-#[cfg(feature = "storage")]
 mod storable;
 
-#[cfg(feature = "storage")]
 pub use double_buffer::{DoubleBuffered, SlotState};
-#[cfg(feature = "storage")]
 pub use raw::Raw;
-#[cfg(feature = "storage")]
 pub use storable::{BitMask, Storable, bytes_for};
 
 /// Declare what lives on one part, and the only way to reach one.
@@ -48,7 +42,6 @@ pub use storable::{BitMask, Storable, bytes_for};
 /// a page, or a layout too large for the part, fails the build.
 ///
 /// One invocation per chip, not per part number.
-#[cfg(feature = "storage")]
 pub use m24xx_ner_macros::eeprom_layout;
 
 /// Derive [`Storable`] for a struct whose every field is itself a [`Storable`].
@@ -63,11 +56,9 @@ pub use m24xx_ner_macros::eeprom_layout;
 ///     bad:     BitMask<23>,
 /// }
 /// ```
-#[cfg(feature = "storage")]
 pub use m24xx_ner_macros::Storable;
 
 /// Not public API: what generated code needs in scope.
-#[cfg(feature = "storage")]
 #[doc(hidden)]
 pub mod __private {
     pub use crate::double_buffer::HEADER;
@@ -296,7 +287,6 @@ impl<I2C: I2c, D: DelayNs, const CAPACITY: u32, const PAGE_SIZE: usize>
     }
 }
 
-#[cfg(feature = "storage")]
 impl<I2C: I2c, D: DelayNs, const CAPACITY: u32, const PAGE_SIZE: usize>
     embedded_storage_async::ReadStorage for Eeprom<I2C, D, CAPACITY, PAGE_SIZE>
 {
@@ -311,7 +301,6 @@ impl<I2C: I2c, D: DelayNs, const CAPACITY: u32, const PAGE_SIZE: usize>
     }
 }
 
-#[cfg(feature = "storage")]
 impl<I2C: I2c, D: DelayNs, const CAPACITY: u32, const PAGE_SIZE: usize>
     embedded_storage_async::Storage for Eeprom<I2C, D, CAPACITY, PAGE_SIZE>
 {
@@ -366,14 +355,12 @@ impl Iterator for PageWrites {
     }
 }
 
-#[cfg(feature = "storage")]
 const MAGIC: u32 = 0x1234_5678;
 
 /// CRC-32/ISO-HDLC over `parts` in order, seeded with [`MAGIC`].
 ///
 /// A caller folds in whatever else it wants bound to the value - a slot index, say -
 /// by passing it as a leading part. None of it is stored.
-#[cfg(feature = "storage")]
 pub(crate) fn crc32(parts: &[&[u8]]) -> u32 {
     let mut crc = crc32_update(0xFFFF_FFFFu32, &MAGIC.to_le_bytes());
     let mut i = 0usize;
@@ -385,7 +372,6 @@ pub(crate) fn crc32(parts: &[&[u8]]) -> u32 {
 }
 
 /// CRC-32/ISO-HDLC
-#[cfg(feature = "storage")]
 const CRC32_TABLE: [u32; 256] = {
     let mut table = [0u32; 256];
     let mut i = 0usize;
@@ -408,7 +394,6 @@ const CRC32_TABLE: [u32; 256] = {
 
 /// Seed with `!0` and invert the result; feed the return value back in to carry on
 /// over several slices.
-#[cfg(feature = "storage")]
 const fn crc32_update(crc: u32, data: &[u8]) -> u32 {
     let mut crc = crc;
     let mut i = 0usize;
