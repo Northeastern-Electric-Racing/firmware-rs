@@ -1,65 +1,92 @@
 #![no_std]
-//! Driver for the STMicroelectronics M24 series I2C EEPROMs with a two byte address.
+//! Driver for the STMicroelectronics M24 series EEPROMs
 //!
-//! One [`Eeprom`] serves both flavours, the way `embassy_stm32`'s own `I2c` does:
-//! async methods take the plain names, blocking ones take a `blocking_` prefix, and
-//! both `embedded-storage` traits are implemented. There is no single trait that is
-//! blocking and async at once - `embedded_hal::i2c::I2c` and
-//! `embedded_hal_async::i2c::I2c` are separate traits in separate crates, and a type
-//! that does both simply implements both - so this driver does the same.
+//! A part is reached only through a layout declared with [`eeprom_layout!`].
 //!
-//! ```ignore
-//! let mut eeprom = M24C32::new(i2c, Delay, ChipEnable::GROUNDED);
-//! eeprom.write(0, b"hello").await?;       // async
-//! eeprom.blocking_write(0, b"hello")?;    // blocking
-//! ```
-//!
-//! After construction the layer that lays out records - banks, rings, wear levelling,
-//! none of which belong here - can take `&mut impl Storage` and never name this crate
-//! again.
-//!
-//! ## The family
-//!
-//! These are the M24 parts whose byte address fits in two bytes. Below them the
-//! M24C01/C02 use a single address byte and the M24C04/C08/C16 steal their high
-//! address bits from the chip enable field, so one device answers on several bus
-//! addresses; above them the M24M01 needs a seventeenth address bit and steals it the
-//! same way. Neither shape fits the wire format here.
-//!
-//! Listing all five costs nothing in a binary: a generic is only compiled for the
-//! parameters it is instantiated with, so an alias nobody constructs emits no code.
+//! Async only: a page takes up to 5 ms to commit and the part holds the bus off for
+//! all of it, which is too long to block an executor.
 
-#[cfg(feature = "async")]
-mod async_store;
-#[cfg(feature = "sync")]
-mod blocking_store;
+use embedded_hal::i2c::{Error as _, ErrorKind, Operation};
 
-/// Largest page in the supported family (M24512). The command buffer is sized for it
-/// so that the page size can stay a const generic without `generic_const_exprs`.
-const MAX_PAGE: usize = 128;
+/// The bus and delay traits a store is generic over, re-exported so a consumer can
+/// name them without depending on `embedded-hal-async` itself.
+pub use embedded_hal_async::delay::DelayNs;
+pub use embedded_hal_async::i2c::I2c;
 
-/// Two address bytes plus one full page of data.
-const CMD_BUF: usize = MAX_PAGE + 2;
+#[cfg(feature = "storage")]
+mod double_buffer;
+#[cfg(feature = "storage")]
+mod raw;
+#[cfg(feature = "storage")]
+mod storable;
 
-/// How long the part may hold the bus off while it commits a page, per datasheet tW
-/// (5 ms max). Polled once a millisecond, with margin.
+#[cfg(feature = "storage")]
+pub use double_buffer::{DoubleBuffered, SlotState};
+#[cfg(feature = "storage")]
+pub use raw::Raw;
+#[cfg(feature = "storage")]
+pub use storable::{BitMask, Storable, bytes_for};
+
+/// Declare what lives on one part, and the only way to reach one.
+///
+/// ```ignore
+/// eeprom_layout! {
+///     BmsStore for M24C32;
+///
+///     bad_thermistors: DoubleBuffered<BadThermistors>,
+///     scratch: Raw<4>,
+/// }
+///
+/// let mut store = BmsStore::init(i2c, Delay, ChipEnable::GROUNDED);
+/// store.open().await?;
+/// store.bad_thermistors().commit(&mask).await?;
+/// ```
+///
+/// A region is `DoubleBuffered<T>` for any `T` implementing [`Storable`], or
+/// `Raw<N>` pages with no scheme over them. Regions take the next free pages in declaration order,
+/// so no page number is written down and two cannot collide. A value too large for
+/// a page, or a layout too large for the part, fails the build.
+///
+/// One invocation per chip, not per part number.
+#[cfg(feature = "storage")]
+pub use m24xx_ner_macros::eeprom_layout;
+
+/// Derive [`Storable`] for a struct whose every field is itself a [`Storable`].
+///
+/// Use [`BitMask`] for a flag array; `[bool; N]` would cost a byte per flag.
+///
+/// ```ignore
+/// #[derive(Clone, PartialEq, Storable)]
+/// struct PackSoc {
+///     percent: u16,
+///     cycles:  u32,
+///     bad:     BitMask<23>,
+/// }
+/// ```
+#[cfg(feature = "storage")]
+pub use m24xx_ner_macros::Storable;
+
+/// Not public API: what generated code needs in scope.
+#[cfg(feature = "storage")]
+#[doc(hidden)]
+pub mod __private {
+    pub use crate::double_buffer::HEADER;
+    pub use crate::{DelayNs, I2c};
+}
+
+/// Datasheet tW is 5 ms max, polled once a millisecond with margin.
 const WRITE_CYCLE_POLLS: u32 = 10;
-
-/// Delay between acknowledge polls, in milliseconds.
 const POLL_INTERVAL_MS: u32 = 1;
 
 /// How the part's three chip enable pins are strapped on the board.
 ///
-/// E2/E1/E0 are the low three bits of the device select byte, which is why eight of
-/// these parts can share one bus. This is a strapping, not a memory address and not a
-/// bus address: it says which physical device you are talking to.
+/// (effectively determines I2C address)
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct ChipEnable(u8);
 
 impl ChipEnable {
-    /// All three pins tied to ground. The usual strapping where a board carries one
-    /// of these parts.
+    /// All three pins tied to ground.
     pub const GROUNDED: Self = Self(0);
 
     /// From the level on each pin.
@@ -67,13 +94,11 @@ impl ChipEnable {
         Self(((e2 as u8) << 2u32) | ((e1 as u8) << 1u32) | e0 as u8)
     }
 
-    /// From the strapping read off the schematic as a number, `0b_E2_E1_E0`. Anything
-    /// above the low three bits would walk off the select field and is discarded.
+    /// From the strapping read off the schematic as `0b_E2_E1_E0`.
     pub const fn from_bits(bits: u8) -> Self {
         Self(bits & 0b111)
     }
 
-    /// The seven bit address this part answers to on the bus: `1010` then E2/E1/E0.
     const fn bus_address(self) -> u8 {
         0b1010_000 | self.0
     }
@@ -83,35 +108,50 @@ impl ChipEnable {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Error<E> {
-    /// The access runs past the end of the array, where the device would wrap around
-    /// and overwrite the start of memory instead of failing.
+    /// Past the end of the array, where the device wraps around and overwrites the start of memory rather than failing.
     OutOfBounds {
         /// First byte the caller asked for.
-        offset: u32,
+        address: u32,
         /// How many bytes the caller asked for.
         len: u32,
         /// Size of the array.
         capacity: u32,
     },
-    /// The part never acknowledged again after a write, so the page may or may not
-    /// have committed. Whether the data landed is not knowable from here.
+    /// The part never acknowledged again after a write. Whether the page committed is not knowable from here.
     WriteTimeout,
     /// The bus itself failed.
     I2c(E),
 }
 
-/// An M24 series EEPROM.
+/// A failed access through a layout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum StoreError<E> {
+    /// The part underneath failed.
+    Storage(E),
+    /// What came back did not decode as what went out. The live record was not the
+    /// one written to, so the previous value is still current.
+    Verify,
+    /// Past the end of a [`Raw`] region.
+    OutOfRegion {
+        /// Offset within the region that was asked for.
+        offset: u32,
+        /// How many bytes were asked for.
+        len: u32,
+        /// Size of the region in bytes.
+        region: u32,
+    },
+}
+
+/// An M24 series EEPROM, owned by a layout.
 ///
-/// Reach for a part alias - [`M24C32`] and friends - rather than naming the capacity
-/// and page size by hand.
-pub struct Eeprom<I2C, D, const CAPACITY: u32, const PAGE: u32> {
+/// `CAPACITY` is in bytes, like every address here; `PAGE_SIZE` is in bytes but typed
+/// `usize` so a buffer can be exactly one page wide. Name it through a part alias in an
+/// [`eeprom_layout!`] declaration; there is no way to build one directly.
+pub struct Eeprom<I2C, D, const CAPACITY: u32, const PAGE_SIZE: usize> {
     i2c: I2C,
     delay: D,
-    /// Which device on the bus, already resolved to its seven bit address.
-    address: u8,
-    /// Address bytes and payload, staged here so a page write goes out as one
-    /// uninterrupted bus write.
-    cmd: [u8; CMD_BUF],
+    bus_address: u8,
 }
 
 /// M24C32: 4 KB, 32 byte pages.
@@ -125,94 +165,197 @@ pub type M24256<I2C, D> = Eeprom<I2C, D, 32_768, 64>;
 /// M24512: 64 KB, 128 byte pages.
 pub type M24512<I2C, D> = Eeprom<I2C, D, 65_536, 128>;
 
-impl<I2C, D, const CAPACITY: u32, const PAGE: u32> Eeprom<I2C, D, CAPACITY, PAGE> {
+impl<I2C, D, const CAPACITY: u32, const PAGE_SIZE: usize> Eeprom<I2C, D, CAPACITY, PAGE_SIZE> {
     /// Bind the driver to the part strapped to `chip_enable`.
     ///
-    /// The delay is held rather than passed per call, so that the `embedded-storage`
-    /// traits - which take no delay - fit this type directly.
-    pub const fn new(i2c: I2C, delay: D, chip_enable: ChipEnable) -> Self {
+    /// Not public API
+    #[doc(hidden)]
+    pub const fn __new(i2c: I2C, delay: D, chip_enable: ChipEnable) -> Self {
         Self {
             i2c,
             delay,
-            address: chip_enable.bus_address(),
-            cmd: [0u8; CMD_BUF],
+            bus_address: chip_enable.bus_address(),
         }
     }
 
-    /// Size of the array in bytes.
-    pub const fn capacity(&self) -> u32 {
-        CAPACITY
+    /// How many pages the array holds, which bounds any page indexed layout.
+    pub const fn pages() -> usize {
+        CAPACITY as usize / PAGE_SIZE
     }
 
-    /// Give the bus and the delay back.
-    pub fn release(self) -> (I2C, D) {
-        (self.i2c, self.delay)
+    /// Bytes in one page, the unit everything atomic is counted in.
+    pub const fn page_size() -> usize {
+        PAGE_SIZE
     }
 
-    /// Reject an access that would run off the end of the array, since the hardware
-    /// wraps around to the start rather than refusing.
-    fn check_bounds<E>(offset: u32, len: usize) -> Result<(), Error<E>> {
+    fn check_bounds<E>(address: u32, len: usize) -> Result<(), Error<E>> {
         let len = len as u32;
-        if offset.checked_add(len).is_none_or(|end| end > CAPACITY) {
+        if address.checked_add(len).is_none_or(|end| end > CAPACITY) {
             return Err(Error::OutOfBounds {
-                offset,
+                address,
                 len,
                 capacity: CAPACITY,
             });
         }
         Ok(())
     }
+}
 
-    /// Stage a page write: the two address bytes, then the payload. Returns how many
-    /// bytes of `cmd` to put on the bus.
-    fn stage(&mut self, offset: u32, data: &[u8]) -> usize {
-        debug_assert!(data.len() <= PAGE as usize);
-        self.cmd[..2].copy_from_slice(&memory_address(offset));
-        self.cmd[2..data.len() + 2].copy_from_slice(data);
-        data.len() + 2
+impl<I2C: I2c, D: DelayNs, const CAPACITY: u32, const PAGE_SIZE: usize>
+    Eeprom<I2C, D, CAPACITY, PAGE_SIZE>
+{
+    /// Read `buf.len()` bytes from `address`.
+    ///
+    /// Sequential reads roll over at the end of the array rather than at a page
+    /// boundary, so any length goes out as one transaction.
+    pub(crate) async fn read(
+        &mut self,
+        address: u32,
+        buf: &mut [u8],
+    ) -> Result<(), Error<I2C::Error>> {
+        Self::check_bounds(address, buf.len())?;
+        if buf.is_empty() {
+            return Ok(());
+        }
+        let addr_bytes = address_bytes(address);
+        // Another store on the same part may be mid write cycle, during which this
+        // one is NACKed rather than answered. Same retry as a write.
+        let mut polls = 0u32;
+        loop {
+            match self
+                .i2c
+                .write_read(self.bus_address, &addr_bytes, buf)
+                .await
+            {
+                Ok(()) => return Ok(()),
+                Err(err) if matches!(err.kind(), ErrorKind::NoAcknowledge(_)) => {
+                    if polls >= WRITE_CYCLE_POLLS {
+                        return Err(Error::WriteTimeout);
+                    }
+                    polls += 1;
+                    self.delay.delay_ms(POLL_INTERVAL_MS).await;
+                }
+                Err(err) => return Err(Error::I2c(err)),
+            }
+        }
+    }
+
+    /// Write `data` at `address`, splitting at page boundaries. Returns once every page has committed.
+    pub(crate) async fn write(
+        &mut self,
+        address: u32,
+        data: &[u8],
+    ) -> Result<(), Error<I2C::Error>> {
+        Self::check_bounds(address, data.len())?;
+        for (addr, range) in page_writes(address, data.len(), PAGE_SIZE) {
+            self.write_page(addr, &data[range]).await?;
+        }
+        Ok(())
+    }
+
+    async fn write_page(&mut self, address: u32, data: &[u8]) -> Result<(), Error<I2C::Error>> {
+        debug_assert!(data.len() <= PAGE_SIZE);
+        let addr_bytes = address_bytes(address);
+
+        let mut polls = 0u32;
+        loop {
+            // Adjacent writes are sent with no stop or repeated start between them,
+            // so this is one bus write without staging both into a buffer.
+            let mut ops = [Operation::Write(&addr_bytes), Operation::Write(data)];
+            match self.i2c.transaction(self.bus_address, &mut ops).await {
+                Ok(()) => break,
+                // A NACK means an earlier write is still committing and the part has
+                // taken itself off the bus, so retrying doubles as the wait for it.
+                Err(err) if matches!(err.kind(), ErrorKind::NoAcknowledge(_)) => {
+                    if polls >= WRITE_CYCLE_POLLS {
+                        return Err(Error::WriteTimeout);
+                    }
+                    polls += 1;
+                    self.delay.delay_ms(POLL_INTERVAL_MS).await;
+                }
+                Err(err) => return Err(Error::I2c(err)),
+            }
+        }
+
+        self.wait_ready().await
+    }
+
+    async fn wait_ready(&mut self) -> Result<(), Error<I2C::Error>> {
+        // A one byte read rather than a zero length write: an address-only
+        // transaction is not portable across HALs, and the byte is discarded.
+        let mut scratch = [0u8; 1];
+        for _ in 0..WRITE_CYCLE_POLLS {
+            self.delay.delay_ms(POLL_INTERVAL_MS).await;
+            match self.i2c.read(self.bus_address, &mut scratch).await {
+                Ok(()) => return Ok(()),
+                Err(err) if matches!(err.kind(), ErrorKind::NoAcknowledge(_)) => (),
+                Err(err) => return Err(Error::I2c(err)),
+            }
+        }
+        Err(Error::WriteTimeout)
     }
 }
 
-/// A byte offset within the array, as the two bytes that carry it on the wire.
-///
-/// This is where in memory you are reading or writing, sent after the device select
-/// byte. Nothing to do with [`ChipEnable`], which picks the device itself.
-const fn memory_address(offset: u32) -> [u8; 2] {
-    [(offset >> 8u32) as u8, offset as u8]
+#[cfg(feature = "storage")]
+impl<I2C: I2c, D: DelayNs, const CAPACITY: u32, const PAGE_SIZE: usize>
+    embedded_storage_async::ReadStorage for Eeprom<I2C, D, CAPACITY, PAGE_SIZE>
+{
+    type Error = Error<I2C::Error>;
+
+    fn capacity(&self) -> usize {
+        CAPACITY as usize
+    }
+
+    async fn read(&mut self, address: u32, bytes: &mut [u8]) -> Result<(), Self::Error> {
+        Self::read(self, address, bytes).await
+    }
 }
 
-/// Splits an access into the runs that fall inside a single page.
+#[cfg(feature = "storage")]
+impl<I2C: I2c, D: DelayNs, const CAPACITY: u32, const PAGE_SIZE: usize>
+    embedded_storage_async::Storage for Eeprom<I2C, D, CAPACITY, PAGE_SIZE>
+{
+    async fn write(&mut self, address: u32, bytes: &[u8]) -> Result<(), Self::Error> {
+        Self::write(self, address, bytes).await
+    }
+}
+
+/// An address within the array, as the two bytes that carry it on the wire. Nothing
+/// to do with [`ChipEnable`], which picks the device.
+const fn address_bytes(address: u32) -> [u8; 2] {
+    [(address >> 8u32) as u8, address as u8]
+}
+
+/// The page writes one access becomes: each item is a device address and the slice
+/// of the caller's buffer that goes there.
 ///
-/// A write that crosses a page boundary does not continue into the next page - the
-/// address wraps back to the start of the page it began in, quietly corrupting what
-/// was there. Reads have no such limit and need no splitting.
-struct PageChunks {
+/// A write crossing a page boundary does not continue into the next page: the
+/// address wraps back to the start of the page it began in, corrupting what was
+/// there. Reads have no such limit, so only writes are split.
+const fn page_writes(address: u32, len: usize, page_size: usize) -> PageWrites {
+    PageWrites {
+        next: address,
+        end: address + len as u32,
+        base: address,
+        page_size: page_size as u32,
+    }
+}
+
+struct PageWrites {
     next: u32,
     end: u32,
     base: u32,
-    page: u32,
+    page_size: u32,
 }
 
-impl PageChunks {
-    const fn new(offset: u32, len: u32, page: u32) -> Self {
-        Self {
-            next: offset,
-            end: offset + len,
-            base: offset,
-            page,
-        }
-    }
-}
-
-impl Iterator for PageChunks {
-    /// The device address this run starts at, and where it sits in the caller's buffer.
+impl Iterator for PageWrites {
     type Item = (u32, core::ops::Range<usize>);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.next >= self.end {
             return None;
         }
-        let page_end = (self.next / self.page + 1) * self.page;
+        let page_end = (self.next / self.page_size + 1) * self.page_size;
         let run_end = page_end.min(self.end);
         let item = (
             self.next,
@@ -221,4 +364,58 @@ impl Iterator for PageChunks {
         self.next = run_end;
         Some(item)
     }
+}
+
+#[cfg(feature = "storage")]
+const MAGIC: u32 = 0x1234_5678;
+
+/// CRC-32/ISO-HDLC over `parts` in order, seeded with [`MAGIC`].
+///
+/// A caller folds in whatever else it wants bound to the value - a slot index, say -
+/// by passing it as a leading part. None of it is stored.
+#[cfg(feature = "storage")]
+pub(crate) fn crc32(parts: &[&[u8]]) -> u32 {
+    let mut crc = crc32_update(0xFFFF_FFFFu32, &MAGIC.to_le_bytes());
+    let mut i = 0usize;
+    while i < parts.len() {
+        crc = crc32_update(crc, parts[i]);
+        i += 1usize;
+    }
+    crc ^ 0xFFFF_FFFFu32
+}
+
+/// CRC-32/ISO-HDLC
+#[cfg(feature = "storage")]
+const CRC32_TABLE: [u32; 256] = {
+    let mut table = [0u32; 256];
+    let mut i = 0usize;
+    while i < 256usize {
+        let mut crc = i as u32;
+        let mut bit = 0u32;
+        while bit < 8u32 {
+            crc = if crc & 1u32 == 0u32 {
+                crc >> 1u32
+            } else {
+                (crc >> 1u32) ^ 0xEDB8_8320u32
+            };
+            bit += 1u32;
+        }
+        table[i] = crc;
+        i += 1usize;
+    }
+    table
+};
+
+/// Seed with `!0` and invert the result; feed the return value back in to carry on
+/// over several slices.
+#[cfg(feature = "storage")]
+const fn crc32_update(crc: u32, data: &[u8]) -> u32 {
+    let mut crc = crc;
+    let mut i = 0usize;
+    while i < data.len() {
+        let index = ((crc ^ data[i] as u32) & 0xFFu32) as usize;
+        crc = (crc >> 8u32) ^ CRC32_TABLE[index];
+        i += 1usize;
+    }
+    crc
 }
