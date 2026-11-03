@@ -100,31 +100,6 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
             #( #layouts #names(#names), )*
         }
 
-        /// Why a frame couldn't be decoded.
-        #[derive(Clone, Copy, Debug)]
-        pub enum DecodeError {
-            RemoteFrame(Id),
-            UnknownId(Id),
-            BadLength(&'static str),
-        }
-
-        impl defmt::Format for DecodeError {
-            fn format(&self, f: defmt::Formatter) {
-                match *self {
-                    DecodeError::RemoteFrame(Id::Standard(id)) =>
-                        defmt::write!(f, "RemoteFrame(Standard({=u16:#x}))", id.as_raw()),
-                    DecodeError::RemoteFrame(Id::Extended(id)) =>
-                        defmt::write!(f, "RemoteFrame(Extended({=u32:#x}))", id.as_raw()),
-                    DecodeError::UnknownId(Id::Standard(id)) =>
-                        defmt::write!(f, "UnknownId(Standard({=u16:#x}))", id.as_raw()),
-                    DecodeError::UnknownId(Id::Extended(id)) =>
-                        defmt::write!(f, "UnknownId(Extended({=u32:#x}))", id.as_raw()),
-                    DecodeError::BadLength(name) =>
-                        defmt::write!(f, "BadLength({=str})", name),
-                }
-            }
-        }
-
         impl Msg {
             /// The CAN ID of this message.
             #[inline]
@@ -142,27 +117,29 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
             }
 
             #[inline]
-            pub fn decode<F: Frame>(frame: &F) -> Result<Self, DecodeError> {
+            pub fn decode<F: Frame>(frame: &F) -> Option<Self> {
                 if frame.is_remote_frame() {
-                    return Err(DecodeError::RemoteFrame(frame.id()));
+                    return None;
                 }
                 Self::decode_raw(frame.id(), frame.data())
             }
 
-            pub fn decode_raw(id: Id, data: &[u8]) -> Result<Self, DecodeError> {
+            pub fn decode_raw(id: Id, data: &[u8]) -> Option<Self> {
                 let key = match id {
                     Id::Standard(s) => (false, s.as_raw() as u32),
                     Id::Extended(e) => (true, e.as_raw()),
                 };
                 let (len, repr_bytes, name) = match key {
                     #( #layout_arms )*
-                    _ => return Err(DecodeError::UnknownId(id)),
+                    _ => return None,
                 };
-                let raw = conv::read_be(data, len, repr_bytes)
-                    .ok_or(DecodeError::BadLength(name))?;
-                Ok(match key {
+                let raw = match conv::read_be(data, len, repr_bytes) {
+                    Some(raw) => raw,
+                    None => return None,
+                };
+                Some(match key {
                     #( #build_arms )*
-                    _ => return Err(DecodeError::UnknownId(id)),
+                    _ => return None,
                 })
             }
         }
