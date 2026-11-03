@@ -70,12 +70,14 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
             let name = struct_ident(m);
             let id = u32::from_str_radix(m.id.trim_start_matches("0x"), 16).unwrap();
             let ext = m.is_ext.unwrap_or(false);
+            let name_str = name.to_string();
             let layout = quote! {
                 (#ext, #id) => {
                     let _: () = <#name as CanMessage>::CHECK;
                     (
                         <#name as CanMessage>::LEN,
                         ::core::mem::size_of::<<#name as CanMessage>::Repr>(),
+                        #name_str,
                     )
                 }
             };
@@ -103,7 +105,24 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
         pub enum DecodeError {
             RemoteFrame(Id),
             UnknownId(Id),
-            BadLength(Id),
+            BadLength(&'static str),
+        }
+
+        impl defmt::Format for DecodeError {
+            fn format(&self, f: defmt::Formatter) {
+                match *self {
+                    DecodeError::RemoteFrame(Id::Standard(id)) =>
+                        defmt::write!(f, "RemoteFrame(Standard({=u16:#x}))", id.as_raw()),
+                    DecodeError::RemoteFrame(Id::Extended(id)) =>
+                        defmt::write!(f, "RemoteFrame(Extended({=u32:#x}))", id.as_raw()),
+                    DecodeError::UnknownId(Id::Standard(id)) =>
+                        defmt::write!(f, "UnknownId(Standard({=u16:#x}))", id.as_raw()),
+                    DecodeError::UnknownId(Id::Extended(id)) =>
+                        defmt::write!(f, "UnknownId(Extended({=u32:#x}))", id.as_raw()),
+                    DecodeError::BadLength(name) =>
+                        defmt::write!(f, "BadLength({=str})", name),
+                }
+            }
         }
 
         impl Msg {
@@ -112,6 +131,13 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
             pub const fn id(&self) -> Id {
                 match self {
                     #( Msg::#names(_) => <#names as CanMessage>::ID, )*
+                }
+            }
+
+            #[inline]
+            pub const fn name(&self) -> &'static str {
+                match self {
+                    #( Msg::#names(_) => stringify!(#names), )*
                 }
             }
 
@@ -128,12 +154,12 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
                     Id::Standard(s) => (false, s.as_raw() as u32),
                     Id::Extended(e) => (true, e.as_raw()),
                 };
-                let (len, repr_bytes) = match key {
+                let (len, repr_bytes, name) = match key {
                     #( #layout_arms )*
                     _ => return Err(DecodeError::UnknownId(id)),
                 };
                 let raw = conv::read_be(data, len, repr_bytes)
-                    .ok_or(DecodeError::BadLength(id))?;
+                    .ok_or(DecodeError::BadLength(name))?;
                 Ok(match key {
                     #( #build_arms )*
                     _ => return Err(DecodeError::UnknownId(id)),
