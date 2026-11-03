@@ -37,21 +37,25 @@ Calling `confirm_boot()` keeps the new firmware from being rolled back on the ne
 reset. Call it once the application's required startup checks have succeeded.
 
 Add the ECU's boot-request ID to the CAN receive filter. In the receive task, use
-the generated parser to identify the request and pass its data to `boot-control`:
+the generated parser to identify the request, check its data, and enter the
+bootloader:
 
 ```rust
 match Msg::decode(&frame) {
-    Some(Msg::<Ecu>BootRequest(_)) => bootloader
-        .handle_request(frame.data())
-        .unwrap_or_else(|_| defmt::error!("Failed to persist bootloader request")),
+    Some(Msg::<Ecu>BootRequest(_)) if boot_control::is_valid_request(frame.data()) => {
+        // Application-specific cleanup before reset.
+        bootloader
+            .enter_bootloader()
+            .unwrap_or_else(|_| defmt::error!("Failed to persist bootloader request"));
+    }
     _ => {}
 }
 ```
 
 Replace `<Ecu>BootRequest` with the cangen-generated boot-request message for the
-application's ECU. Boot-control validates the boot-request data, saves the
-boot-entry request, and resets only after a successful state write. Invalid data is
-ignored. Perform any application-specific shutdown before calling `handle_request()`.
+application's ECU. Requests with invalid data are ignored. `enter_bootloader()`
+saves the boot-entry request and resets only after a successful state write, so an
+unrelated reset during cleanup still starts the application.
 
 ## Memory layout
 
