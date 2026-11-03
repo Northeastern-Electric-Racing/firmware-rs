@@ -129,9 +129,9 @@ impl AccelVec {
 }
 
 impl NerLsm6dsv16x {
-    pub fn new(spi: ImuSpi, tim: Delay, can_tx: DynamicSender<'static, Frame>) -> Self {
+    pub fn new(spi: ImuSpi, time: Delay, can_tx: DynamicSender<'static, Frame>) -> Self {
         NerLsm6dsv16x {
-            imu: Lsm6dsv16x::new_spi(spi, tim),
+            imu: Lsm6dsv16x::new_spi(spi, time),
             can_tx: can_tx,
         }
     }
@@ -159,7 +159,7 @@ impl NerLsm6dsv16x {
             .with_imu_accelerometer_x(accel.x.get::<milligravity>())
             .with_imu_accelerometer_y(accel.y.get::<milligravity>())
             .with_imu_accelerometer_z(accel.z.get::<milligravity>());
-        self.can_tx.send(frame.to_can_frame()).await;
+        ner_can::send(self.can_tx, frame.to_can_frame()).await;
     }
 
     async fn send_angular_vel(&self, vel: AngularVelVec) {
@@ -167,7 +167,7 @@ impl NerLsm6dsv16x {
             .with_imu_gyro_x(vel.roll_rate.get::<mdps::millidegree_per_second>())
             .with_imu_gyro_y(vel.pitch_rate.get::<mdps::millidegree_per_second>())
             .with_imu_gyro_z(vel.yaw_rate.get::<mdps::millidegree_per_second>());
-        self.can_tx.send(frame.to_can_frame()).await;
+        ner_can::send(self.can_tx, frame.to_can_frame()).await;
     }
     async fn get_anguar_vel(&mut self) -> Option<AngularVelVec> {
         match self.imu.flag_data_ready_get().await {
@@ -246,8 +246,9 @@ impl NerLsm6dsv16x {
         Ok(())
     }
 }
-#[embassy_executor::task]
-pub async fn imu_task(spi: ImuSpi, can_tx: DynamicSender<'static, Frame>) -> ! {
+
+/// Basically a self-contained task if all you need is to push data over CAN
+pub async fn imu_loop(spi: ImuSpi, can_tx: DynamicSender<'static, Frame>) -> ! {
     let mut imu: NerLsm6dsv16x = NerLsm6dsv16x::new(spi, Delay, can_tx);
     imu.init().await.expect("Failed to init IMU");
     loop {
