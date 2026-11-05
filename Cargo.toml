@@ -3,7 +3,12 @@ members = ["drivers/*", "platform/*", "utilities/*"]
 resolver = "3"
 
 # Keep standalone host tools outside embedded workspace builds.
-exclude = ["utilities/cangen/cangen-macro", "utilities/can-flash-cli", "utilities/can-bootloader-config"]
+exclude = [
+    "utilities/cangen/cangen-macro",
+    "utilities/can-flash-cli",
+    "utilities/can-bootloader-config",
+    "drivers/m24xx-ner/m24xx-ner-macros",
+]
 
 [workspace.dependencies]
 defmt = "1"
