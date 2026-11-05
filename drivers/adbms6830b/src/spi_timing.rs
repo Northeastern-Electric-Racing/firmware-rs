@@ -1,11 +1,17 @@
-//! SPI timing requirements, Table 11. All values are minimums.
+//! SPI timing, from ADBMS6830B Table 11 and ADBMS6822 Table 9.
 //!
-//! t5 spans *between* transactions, so [`crate::line::Line`] enforces it. t6 and t7 sit inside a
-//! transaction around chip select, which this driver never touches -- they belong to the
-//! `SpiDevice`, and `embedded-hal-bus`'s `ExclusiveDevice` provides neither.
+//! Both bind the pins we drive: the 6822 transports chip select rather than terminating it, so the
+//! CS-high the chip sees is the CS-high we drove. Each constant is the larger of the two tables --
+//! which matters for t5, where Table 9 asks 1 us and Table 11 asks 2 us.
 //!
-//! Footnote 1: t_CLK, t6 and t7 already budget 50 ns of cable delay each direction (~10 m of
-//! Cat-5); derate them for a longer harness. t5 does not.
+//! `ExclusiveDevice` enforces none of them. t5 spans *between* transactions, so [`BusIdle`] covers
+//! it; t6 and t7 sit inside one, around a chip select this driver never touches, so they go in as
+//! [`cs_setup`] and [`cs_hold`] operations at either end.
+//!
+//! t_CLK, t6 and t7 budget 50 ns of cable delay each direction (~10 m of Cat-5) and need derating
+//! on a longer harness; t5 does not.
+
+use embedded_hal_async::spi::Operation;
 
 /// t5: CSB rising to CSB falling, the idle between transactions.
 pub const CS_IDLE_NS: u32 = 2_000;
@@ -32,4 +38,19 @@ impl<T: embedded_hal::delay::DelayNs> BusIdle for T {
     fn idle(&mut self) {
         self.delay_ns(CS_IDLE_NS);
     }
+}
+
+/// t7, as the opening operation of a transaction.
+///
+/// Inside the transaction because chip select is already low by then and this driver never touches
+/// it. The `SpiDevice` serves the wait, so `ExclusiveDevice::new_no_delay(...)` panics on it.
+pub const fn cs_setup<'a>() -> Operation<'a, u8> {
+    Operation::DelayNs(CS_SETUP_NS)
+}
+
+/// t6, as the closing operation of a transaction.
+///
+/// Transactions that clock nothing, such as a wake pulse, need neither this nor [`cs_setup`].
+pub const fn cs_hold<'a>() -> Operation<'a, u8> {
+    Operation::DelayNs(CS_HOLD_NS)
 }

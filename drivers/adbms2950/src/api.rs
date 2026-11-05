@@ -1,10 +1,10 @@
 //! The application-facing layer, over one or both isoSPI lines.
 //!
 //! The transport under this is deliberately dumb: it frames a transaction, checks the PEC, holds
-//! the bus idle for t5, and hands back bytes. Everything that
-//! needs *memory* between transactions lives here -- the command counter, PEC tallies, the
-//! cached configuration, and per-line error counts. Without this layer each of those ends up
-//! reimplemented in the application, which is where they were before this module existed.
+//! the bus idle for t5, and hands back bytes. Everything that needs *memory* between transactions
+//! lives here -- the command counter, PEC tallies, the cached configuration, and per-line error
+//! counts. Without this layer each of those ends up reimplemented in the application, which is
+//! where they were before this module existed.
 
 use embassy_time::{Duration, Instant};
 use embedded_hal_async::spi::SpiDevice;
@@ -249,8 +249,7 @@ impl<SPI: SpiDevice, DELAY: BusIdle> Api<SPI, DELAY> {
         }
     }
 
-    /// Folds a transport result into the device tallies, so the timestamp, PEC count and
-    /// per-line error count live in one place rather than at each call site.
+    /// Folds a transport result into the device tallies.
     fn record<T>(&mut self, result: Result<T, Error<SPI::Error>>) -> Result<T, Error<SPI::Error>> {
         match &result {
             Ok(_) => self.device.last_contacted = Some(Instant::now()),
@@ -266,9 +265,8 @@ impl<SPI: SpiDevice, DELAY: BusIdle> Api<SPI, DELAY> {
 
     /// Reads a register group.
     ///
-    /// Unlike the transport's read, this returns the group alone: the command counter that came with it
-    /// is folded into [`Api::device`] instead, alongside the PEC tallies, so callers do not have
-    /// to remember to thread per-reading metadata around.
+    /// Unlike the transport's read, this returns the group alone -- the command counter and PEC
+    /// tallies are folded into [`Api::device`] instead.
     ///
     /// Reads do not increment the device's command counter, so this only ever *checks* it.
     pub async fn read<G: ReadableGroup>(&mut self) -> Result<G, Error<SPI::Error>> {
@@ -403,10 +401,8 @@ impl<SPI: SpiDevice, DELAY: BusIdle> Api<SPI, DELAY> {
 
     /// Waits for the voltage references to come up, by polling the `REFUP` bit in CFGA.
     ///
-    /// After power-up or an `SRST` the chip passes through STANDBY into REFUP on its own; this
-    /// is how you find out it has arrived. Measurements taken before this are not trustworthy.
-    ///
-    /// Each attempt is a full [`Api::read`], so the tallies stay current while waiting.
+    /// After power-up or an `SRST` the chip passes through STANDBY into REFUP on its own.
+    /// Measurements taken before this are not trustworthy.
     pub async fn wait_for_reference(&mut self) -> Result<(), Error<SPI::Error>> {
         use crate::chip::registers::config_a::types::ReferencePowered;
 
@@ -427,8 +423,6 @@ impl<SPI: SpiDevice, DELAY: BusIdle> Api<SPI, DELAY> {
     }
 
     /// Confirms the attached device is an ADBMS2950B, returning its serial ID.
-    ///
-    /// Reads `RDSID` and checks the `DEVID` bits. Useful as a presence check.
     pub async fn detect(
         &mut self,
     ) -> Result<crate::chip::registers::serial_id::SerialId, Error<SPI::Error>> {
@@ -447,7 +441,7 @@ impl<SPI: SpiDevice, DELAY: BusIdle> Api<SPI, DELAY> {
     /// unpredictable number of times, so the loop has to live at this layer: anything driving
     /// the transport's poll without counting the attempts would desynchronize
     /// [`DeviceState::expected_command_counter`] and make every subsequent read look like a
-    /// counter mismatch. That is why the transport has no poll loop of its own.
+    /// counter mismatch.
     async fn autoconvert(
         &mut self,
         start: Command,

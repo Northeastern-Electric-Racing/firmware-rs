@@ -1,6 +1,6 @@
 //! Module representing a single Line of daisy-chained devices
 
-use crate::spi_timing::BusIdle;
+use crate::spi_timing::{BusIdle, cs_hold, cs_setup};
 use embedded_hal_async::spi::{Operation, SpiDevice};
 
 use crate::chip::commands::{self, Command, CommandFrame};
@@ -231,7 +231,8 @@ impl<SPI, DELAY, const N: usize> defmt::Format for Line<SPI, DELAY, N> {
 impl<SPI: SpiDevice, DELAY: BusIdle, const N: usize> Line<SPI, DELAY, N> {
     /// Builds a line on `spi`.
     /// 
-    /// `delay` is what t5 is made of -- see [`crate::spi_timing`].
+    /// `delay` serves t5; t6 and t7 ride inside each transaction. The `SpiDevice` must support
+    /// `Operation::DelayNs` -- `ExclusiveDevice::new_no_delay()` panics on the first transaction.
     pub const fn new(spi: SPI, delay: DELAY) -> Self {
         Self { spi, delay, last_activity: embassy_time::Instant::from_ticks(0) }
     }
@@ -241,8 +242,7 @@ impl<SPI: SpiDevice, DELAY: BusIdle, const N: usize> Line<SPI, DELAY, N> {
         (self.spi, self.delay)
     }
 
-    /// Holds the bus idle for t5. Unconditional rather than measured, and on the error path
-    /// too, since chip select was released either way.
+    /// Holds the bus idle for t5, on the error path too -- chip select was released either way.
     fn idle_for_t5(&mut self) {
         self.delay.idle();
     }
@@ -266,11 +266,15 @@ impl<SPI: SpiDevice, DELAY: BusIdle, const N: usize> Line<SPI, DELAY, N> {
         let err = match payload {
             Some(payload) => {
                 self.spi
-                    .transaction(&mut [Operation::Write(&bytes), payload])
+                    .transaction(&mut [cs_setup(), Operation::Write(&bytes), payload, cs_hold()])
                     .await
             }
             // this is only used for `command()` commands where they are just a command with no payload
-            None => self.spi.transaction(&mut [Operation::Write(&bytes)]).await,
+            None => {
+                self.spi
+                    .transaction(&mut [cs_setup(), Operation::Write(&bytes), cs_hold()])
+                    .await
+            }
         }
         .map_err(Error::Spi);
 
@@ -394,6 +398,7 @@ impl<SPI: SpiDevice, DELAY: BusIdle, const N: usize> Line<SPI, DELAY, N> {
     async fn pulse_line(&mut self, count: usize, gap_us: u32) -> Result<(), Error<SPI::Error>> {
         use embedded_hal_async::spi::{Operation};
         for _ in 0..count {
+            // Clocks nothing, so t7/t6 have no edge to bound; t5 still applies.
             let result = self.spi.transaction(&mut [
                 Operation::DelayNs(gap_us * 1000),
             ]).await.map_err(Error::Spi);
@@ -421,9 +426,8 @@ impl<SPI: SpiDevice, DELAY: BusIdle, const N: usize> Line<SPI, DELAY, N> {
     
     /// PRIVATE! Makes sure the chips are awake.
     /// 
-    /// This will typically issue a `wakeup_from_idle()`, but may issue a full `wakeup()` if the `Line` hasn't been
-    /// used in a very long time. For good measure, this always issues `wakeup_from_idle()` no matter what, even if the
-    /// `Line` has been used recently enough to where a wakeup technically shouldn't be needed.
+    /// Wakes from SLEEP, from IDLE, or not at all, depending on how long the line has sat. A wake
+    /// costs one pulse pair *per chip*, so the no-op case is worth skipping.
     async fn ensure_woke(&mut self, count: usize) -> Result<(), Error<SPI::Error>> {
         use embassy_time::Duration;
         
@@ -436,21 +440,15 @@ impl<SPI: SpiDevice, DELAY: BusIdle, const N: usize> Line<SPI, DELAY, N> {
         const SLEEP_ELAPSED_TIME: Duration = Duration::from_millis(1500);
         
         let elapsed = self.last_activity.elapsed();
-        
-        // elapsed time since last use is less than IDLE_MARGIN, so chips should not have fallen into the IDLE state yet
-        if elapsed < IDLE_ELAPSED_TIME {
-            // at least for now, still do `wakeup_from_idle()` even though we technicalyl shouldn't need to, just for good measure.
-            // u_TODO - marking this since it is something we could probably easily remove if we want to in the future (i.e., we probably don't actually need to wakeup() in this case). it is just here for good measure
-            self.wakeup_from_idle(count).await?;
-        }
-        // elapsed time since last use is larger than IDLE_ELAPSED_TIME (so chips should have fallen IDLE), but is less than SLEEP_ELAPSED_TIME (so chips have not fallen fully asleep yet) 
-        else if (elapsed >= IDLE_ELAPSED_TIME) && (elapsed < SLEEP_ELAPSED_TIME) {
-            self.wakeup_from_idle(count).await?;
-        }
-        // elapsed time is greater than SLEEP_ELAPSED_TIME so chips have fallen fully asleep
-        else {
+
+        if elapsed >= SLEEP_ELAPSED_TIME {
             self.wakeup(count).await?;
+        } else if elapsed >= IDLE_ELAPSED_TIME {
+            self.wakeup_from_idle(count).await?;
         }
+        // Below IDLE_ELAPSED_TIME there is nothing to wake. `last_activity` only advances on a
+        // transaction that succeeded, so a failed one leaves it stale and the next call wakes
+        // anyway -- the safe direction to err in.
 
         Ok(())
     }

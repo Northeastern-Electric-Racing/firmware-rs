@@ -8,7 +8,7 @@
 //! - `api`: **start here, and stay here.** The stateful layer over the transport: command counter,
 //! PEC tallies, cached configuration for read-modify-write, startup waits, and each conversion as
 //! a single trigger-and-poll call. See the `Api` struct.
-//! - `chip`: kind of like a PAC? contains the types representing the register and command schemas from the datasheet.
+//! - `chip`: basically a PAC -- the register and command schemas from the datasheet.
 //! - `spi_timing`: the datasheet's Table 14, and which layer owns each constraint.
 //!
 //! The SPI transport is a private `line` module. `Api` builds and owns both isoSPI lines from the

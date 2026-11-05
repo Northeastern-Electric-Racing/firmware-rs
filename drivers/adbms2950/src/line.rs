@@ -13,7 +13,7 @@ use embedded_hal_async::spi::{Operation, SpiDevice};
 use crate::chip::commands::CommandFrame;
 use crate::chip::pec::{DataPecRx, DataPecTx};
 use crate::chip::registers::{GROUP_BYTES, ReadableGroup, WritableGroup};
-use crate::spi_timing::BusIdle;
+use crate::spi_timing::{BusIdle, cs_hold, cs_setup};
 
 /// Wire length of one register group plus its data PEC.
 const BLOCK_BYTES: usize = GROUP_BYTES + 2;
@@ -74,8 +74,8 @@ pub struct Response<G> {
 
 /// One ADBMS2950B on a SPI or isoSPI link.
 ///
-/// Chip select belongs to the `SpiDevice`, so t6 and t7 do too; t5 is the one this can enforce,
-/// and `DELAY` is what it enforces it with. See [`crate::spi_timing`].
+/// Chip select belongs to the `SpiDevice`, so t6 and t7 ride inside each clocked transaction and
+/// `DELAY` serves t5 between them. See [`crate::spi_timing`].
 ///
 /// **The `SpiDevice` must support [`Operation::DelayNs`]**, because the wake-up pulse is a
 /// delay-only transaction. `ExclusiveDevice::new_no_delay(...)` panics on one.
@@ -95,11 +95,9 @@ impl<SPI: SpiDevice, DELAY: BusIdle> Line<SPI, DELAY> {
         (self.spi, self.delay)
     }
 
-    /// Runs one transaction, then holds the bus idle for t5.
-    ///
-    /// Every bus access routes through here, so t5 covers the wake pulse and back-to-back reads
-    /// alike. Unconditional rather than measured, and on the error path too, since chip select
-    /// was released either way.
+    /// Runs one transaction, then holds the bus idle for t5 -- on the error path too, since chip
+    /// select was released either way. Callers that clock anything bracket their operations with
+    /// [`cs_setup`] and [`cs_hold`].
     async fn transact(
         &mut self,
         operations: &mut [Operation<'_, u8>],
@@ -113,7 +111,8 @@ impl<SPI: SpiDevice, DELAY: BusIdle> Line<SPI, DELAY> {
     pub async fn command(&mut self, frame: CommandFrame) -> Result<(), Error<SPI::Error>> {
         let bytes = frame.to_bytes();
         self.pulse().await?;
-        self.transact(&mut [Operation::Write(&bytes)]).await
+        self.transact(&mut [cs_setup(), Operation::Write(&bytes), cs_hold()])
+            .await
     }
 
     /// Reads a register group.
@@ -126,8 +125,13 @@ impl<SPI: SpiDevice, DELAY: BusIdle> Line<SPI, DELAY> {
         let mut block = [0u8; BLOCK_BYTES];
 
         self.pulse().await?;
-        self.transact(&mut [Operation::Write(&command), Operation::Read(&mut block)])
-            .await?;
+        self.transact(&mut [
+            cs_setup(),
+            Operation::Write(&command),
+            Operation::Read(&mut block),
+            cs_hold(),
+        ])
+        .await?;
 
         let data: [u8; GROUP_BYTES] = {
             let mut out = [0u8; GROUP_BYTES];
@@ -163,8 +167,13 @@ impl<SPI: SpiDevice, DELAY: BusIdle> Line<SPI, DELAY> {
         block[GROUP_BYTES + 1] = pec.pec1();
 
         self.pulse().await?;
-        self.transact(&mut [Operation::Write(&command), Operation::Write(&block)])
-            .await
+        self.transact(&mut [
+            cs_setup(),
+            Operation::Write(&command),
+            Operation::Write(&block),
+            cs_hold(),
+        ])
+        .await
     }
 
     /// Sends a poll command once and reports whether the conversion has finished.
@@ -180,8 +189,13 @@ impl<SPI: SpiDevice, DELAY: BusIdle> Line<SPI, DELAY> {
         let mut status = [0u8; 2];
 
         self.pulse().await?;
-        self.transact(&mut [Operation::Write(&command), Operation::Read(&mut status)])
-            .await?;
+        self.transact(&mut [
+            cs_setup(),
+            Operation::Write(&command),
+            Operation::Read(&mut status),
+            cs_hold(),
+        ])
+        .await?;
 
         Ok(status[1] == 0xFF)
     }
@@ -203,6 +217,8 @@ impl<SPI: SpiDevice, DELAY: BusIdle> Line<SPI, DELAY> {
     /// Called before every bus access, matching what the vendor reference code does. Costs about
     /// 4 us for a single device.
     async fn pulse(&mut self) -> Result<(), Error<SPI::Error>> {
+        // No t7/t6: this transaction clocks nothing, so neither bound has an edge to be measured
+        // against. t5 still applies, since chip select still rises at the end.
         self.transact(&mut [Operation::DelayNs(conversion_times::WAKE_PULSE_US * 1_000)])
             .await
     }
