@@ -108,8 +108,15 @@ pub enum Error<E> {
         /// Size of the array.
         capacity: u32,
     },
-    /// The part never acknowledged again after a write. Whether the page committed is not knowable from here.
+    /// The part accepted a write but never became ready again afterwards. Whether the page committed is not knowable from here.
     WriteTimeout,
+    /// Nothing answered at the part's address, even after waiting out a write cycle.
+    /// Check power, the chip enable strapping, and the bus wiring.
+    NoDevice,
+    /// The part answers on the bus but refused a write, which is what a part with its
+    /// write control (WC) pin held high does: it still acknowledges its address and
+    /// reads, but NACKs the data bytes of a write.
+    WriteProtected,
     /// The bus itself failed.
     I2c(E),
 }
@@ -220,8 +227,10 @@ impl<I2C: I2c, D: DelayNs, const CAPACITY: u32, const PAGE_SIZE: usize>
             {
                 Ok(()) => return Ok(()),
                 Err(err) if matches!(err.kind(), ErrorKind::NoAcknowledge(_)) => {
+                    // Still NACKed after longer than a write cycle can last, so the
+                    // part is not busy: nothing is answering at this address.
                     if polls >= WRITE_CYCLE_POLLS {
-                        return Err(Error::WriteTimeout);
+                        return Err(Error::NoDevice);
                     }
                     polls += 1;
                     self.delay.delay_ms(POLL_INTERVAL_MS).await;
@@ -259,7 +268,11 @@ impl<I2C: I2c, D: DelayNs, const CAPACITY: u32, const PAGE_SIZE: usize>
                 // taken itself off the bus, so retrying doubles as the wait for it.
                 Err(err) if matches!(err.kind(), ErrorKind::NoAcknowledge(_)) => {
                     if polls >= WRITE_CYCLE_POLLS {
-                        return Err(Error::WriteTimeout);
+                        // NACKed for longer than a write cycle can last, so the part is
+                        // not merely busy. Probe it with a one byte read to find out why.
+                        let mut scratch = [0u8; 1];
+                        let probe = self.i2c.read(self.bus_address, &mut scratch).await;
+                        return Err(classify_refused_write(probe));
                     }
                     polls += 1;
                     self.delay.delay_ms(POLL_INTERVAL_MS).await;
@@ -306,6 +319,20 @@ impl<I2C: I2c, D: DelayNs, const CAPACITY: u32, const PAGE_SIZE: usize>
 {
     async fn write(&mut self, address: u32, bytes: &[u8]) -> Result<(), Self::Error> {
         Self::write(self, address, bytes).await
+    }
+}
+
+/// Why a write was refused, given the result of a one byte read probe sent after the
+/// write's retries ran out: a write protected part still acknowledges reads, an absent
+/// one acknowledges nothing.
+///
+/// Relies on the part's behaviour rather than on the HAL naming the NACK's source,
+/// which most HALs report as unknown.
+fn classify_refused_write<E: embedded_hal::i2c::Error>(probe: Result<(), E>) -> Error<E> {
+    match probe {
+        Ok(()) => Error::WriteProtected,
+        Err(err) if matches!(err.kind(), ErrorKind::NoAcknowledge(_)) => Error::NoDevice,
+        Err(err) => Error::I2c(err),
     }
 }
 
