@@ -29,7 +29,7 @@ unit! {
 
 // each unit! expansion emits its own `__system`/`__quantity`/`Conversion`/`Unit`
 // imports and `mod f32`, so a second invocation needs its own module
-mod mdps {
+pub mod mdps {
     unit! {
         system: uom::si;
         quantity: uom::si::angular_velocity;
