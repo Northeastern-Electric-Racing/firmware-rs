@@ -1,0 +1,13 @@
+[package]
+name = "lsm6dsv-ner"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lsm6dsv16x-rs = "2.1.0"
+embedded-hal-async.workspace = true
+defmt.workspace = true
+st-mems-bus = "2.0.0"
+
+[lints]
+workspace = true
