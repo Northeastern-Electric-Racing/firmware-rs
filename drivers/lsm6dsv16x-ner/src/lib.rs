@@ -2,22 +2,23 @@
 
 #[allow(dead_code)]
 use defmt::{error, info, warn};
-use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
-use embassy_stm32::gpio::Output;
-use embassy_stm32::mode::Async;
-use embassy_stm32::spi::{self, Spi};
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_time::{Delay, Timer};
+use embassy_time::Timer;
+use embedded_hal_async::delay::DelayNs;
+use embedded_hal_async::spi::SpiDevice;
+use lsm6dsv16x_rs::asynchronous::Error as LsmError;
 use lsm6dsv16x_rs::asynchronous::Lsm6dsv16x;
 use lsm6dsv16x_rs::asynchronous::register::MainBank;
-use lsm6dsv16x_rs::asynchronous::register::main::{
-    FiltGyLp1Bandwidth, FiltSettlingMask, FiltXlLp2Bandwidth, GyFullScale, Odr, Reset, XlFullScale,
-};
+use lsm6dsv16x_rs::asynchronous::register::main::FiltGyLp1Bandwidth;
+use lsm6dsv16x_rs::asynchronous::register::main::FiltSettlingMask;
+use lsm6dsv16x_rs::asynchronous::register::main::FiltXlLp2Bandwidth;
+use lsm6dsv16x_rs::asynchronous::register::main::GyFullScale;
+use lsm6dsv16x_rs::asynchronous::register::main::Odr;
+use lsm6dsv16x_rs::asynchronous::register::main::Reset;
+use lsm6dsv16x_rs::asynchronous::register::main::XlFullScale;
 use st_mems_bus::asynchronous::SpiBus;
 use uom::si::acceleration::meter_per_second_squared;
 use uom::si::angular_velocity::degree_per_second;
 use uom::si::f32::*;
-
 #[macro_use]
 extern crate uom;
 
@@ -39,11 +40,9 @@ mod mdps {
 }
 use mdps::millidegree_per_second;
 
-pub type ImuSpi =
-    SpiDevice<'static, ThreadModeRawMutex, Spi<'static, Async, spi::mode::Master>, Output<'static>>;
 const ID: u8 = 0x70;
-pub struct NerLsm6dsv16x {
-    imu: Lsm6dsv16x<SpiBus<ImuSpi>, Delay, MainBank>,
+pub struct NerLsm6dsv16x<SPI: SpiDevice, D: DelayNs> {
+    imu: Lsm6dsv16x<SpiBus<SPI>, D, MainBank>,
 }
 
 pub struct AccelVec {
@@ -65,8 +64,14 @@ impl defmt::Format for AccelVec {
 }
 
 #[derive(Debug)]
-pub enum ImuInitError {
-    WrongId,
+pub enum ImuInitError<E> {
+    WrongId(u8),
+    DriverError(LsmError<E>),
+}
+impl<E> From<LsmError<E>> for ImuInitError<E> {
+    fn from(value: LsmError<E>) -> Self {
+        ImuInitError::DriverError(value)
+    }
 }
 
 pub struct AngularVelVec {
@@ -121,11 +126,10 @@ impl AccelVec {
         }
     }
 }
-
-impl NerLsm6dsv16x {
-    pub fn new(spi: ImuSpi, time: Delay) -> Self {
+impl<SPI: SpiDevice, D: DelayNs> NerLsm6dsv16x<SPI, D> {
+    pub fn new(spi: SPI, delay: D) -> Self {
         NerLsm6dsv16x {
-            imu: Lsm6dsv16x::new_spi(spi, time),
+            imu: Lsm6dsv16x::new_spi(spi, delay),
         }
     }
 
@@ -158,41 +162,38 @@ impl NerLsm6dsv16x {
                 }
             }
             Err(_) => {
-                warn!("Reading accelerometer failed!");
+                warn!("Reading gryo failed!");
                 None
             }
         }
     }
-    async fn init(&mut self) -> Result<(), ImuInitError> {
-        Timer::after_millis(5).await;
+    async fn init(&mut self) -> Result<(), ImuInitError<SPI::Error>> {
+        self.imu.tim.delay_ms(5).await;
 
         // Check device ID
-        let id = self.imu.device_id_get().await.unwrap();
+        let id = self.imu.device_id_get().await?;
         if id != ID {
             error!("Unexpected device ID: {:x}", id);
-            return Err(ImuInitError::WrongId);
+            return Err(ImuInitError::WrongId(id));
         }
 
         // Restore default configuration
-        self.imu.reset_set(Reset::RestoreCtrlRegs).await.unwrap();
+        self.imu.reset_set(Reset::RestoreCtrlRegs).await?;
         let mut rst: Reset = Reset::RestoreCtrlRegs;
         while rst != Reset::Ready {
-            rst = self.imu.reset_get().await.unwrap();
+            rst = self.imu.reset_get().await?;
         }
 
         // Enable Block Data Update
-        self.imu.block_data_update_set(1).await.unwrap();
+        self.imu.block_data_update_set(1).await?;
 
         // Set Output Data Rate for accelerometer and gyroscope
-        self.imu.xl_data_rate_set(Odr::_7_5hz).await.unwrap();
-        self.imu.gy_data_rate_set(Odr::_15hz).await.unwrap();
+        self.imu.xl_data_rate_set(Odr::_7_5hz).await?;
+        self.imu.gy_data_rate_set(Odr::_15hz).await?;
 
         // Set full scale for accelerometer and gyroscope
-        self.imu.xl_full_scale_set(XlFullScale::_2g).await.unwrap();
-        self.imu
-            .gy_full_scale_set(GyFullScale::_2000dps)
-            .await
-            .unwrap();
+        self.imu.xl_full_scale_set(XlFullScale::_2g).await?;
+        self.imu.gy_full_scale_set(GyFullScale::_2000dps).await?;
 
         // Configure filtering chain
         let filt_settling_mask = FiltSettlingMask {
@@ -201,22 +202,17 @@ impl NerLsm6dsv16x {
             irq_xl: 1,
             irq_g: 1,
         };
-        self.imu
-            .filt_settling_mask_set(filt_settling_mask)
-            .await
-            .unwrap();
-        self.imu.filt_gy_lp1_set(1).await.unwrap();
+        self.imu.filt_settling_mask_set(filt_settling_mask).await?;
+        self.imu.filt_gy_lp1_set(1).await?;
         self.imu
             .filt_gy_lp1_bandwidth_set(FiltGyLp1Bandwidth::UltraLight)
-            .await
-            .unwrap();
-        self.imu.filt_xl_lp2_set(1).await.unwrap();
+            .await?;
+        self.imu.filt_xl_lp2_set(1).await?;
         self.imu
             .filt_xl_lp2_bandwidth_set(FiltXlLp2Bandwidth::Strong)
-            .await
-            .unwrap();
+            .await?;
 
-        info!("Configuration ended, check the output on the UART channel");
+        info!("IMU init complete");
         Ok(())
     }
 }
