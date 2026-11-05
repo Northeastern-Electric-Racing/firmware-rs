@@ -1,14 +1,12 @@
 #![no_std]
 
-use cangen::ToCanFrame;
+#[allow(dead_code)]
 use defmt::{error, info, warn};
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
-use embassy_stm32::can::Frame;
 use embassy_stm32::gpio::Output;
 use embassy_stm32::mode::Async;
 use embassy_stm32::spi::{self, Spi};
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::channel::DynamicSender;
 use embassy_time::{Delay, Timer};
 use lsm6dsv16x_rs::asynchronous::Lsm6dsv16x;
 use lsm6dsv16x_rs::asynchronous::register::MainBank;
@@ -46,8 +44,6 @@ pub type ImuSpi =
 const ID: u8 = 0x70;
 pub struct NerLsm6dsv16x {
     imu: Lsm6dsv16x<SpiBus<ImuSpi>, Delay, MainBank>,
-    // imu: Lsm6dsox<ImuI2c, Delay>,
-    can_tx: DynamicSender<'static, Frame>,
 }
 
 pub struct AccelVec {
@@ -92,7 +88,6 @@ impl defmt::Format for AngularVelVec {
 }
 
 impl AngularVelVec {
-    #[allow(dead_code)] // This might come in handy later
     fn from_rads_per_s(p: f32, q: f32, r: f32) -> Self {
         AngularVelVec {
             roll_rate: AngularVelocity::new::<degree_per_second>(p),
@@ -110,7 +105,6 @@ impl AngularVelVec {
 }
 
 impl AccelVec {
-    #[allow(dead_code)] // This might come in handy later
     fn from_mps_sq(x: f32, y: f32, z: f32) -> Self {
         AccelVec {
             x: Acceleration::new::<meter_per_second_squared>(x),
@@ -129,19 +123,18 @@ impl AccelVec {
 }
 
 impl NerLsm6dsv16x {
-    pub fn new(spi: ImuSpi, time: Delay, can_tx: DynamicSender<'static, Frame>) -> Self {
+    pub fn new(spi: ImuSpi, time: Delay) -> Self {
         NerLsm6dsv16x {
             imu: Lsm6dsv16x::new_spi(spi, time),
-            can_tx: can_tx,
         }
     }
+
     async fn get_accel(&mut self) -> Option<AccelVec> {
         match self.imu.flag_data_ready_get().await {
             Ok(f) => {
                 let raw_accel = self.imu.acceleration_raw_get().await;
                 if f.drdy_xl == 1 && raw_accel.is_ok() {
                     let accel = AccelVec::from_raws(raw_accel.unwrap());
-                    // info!("Current acceleration: {}", accel);
                     Some(accel)
                 } else {
                     None
@@ -153,29 +146,12 @@ impl NerLsm6dsv16x {
             }
         }
     }
-
-    async fn send_accel(&self, accel: AccelVec) {
-        let frame = cangen::ImuAccelerometer::new()
-            .with_imu_accelerometer_x(accel.x.get::<milligravity>())
-            .with_imu_accelerometer_y(accel.y.get::<milligravity>())
-            .with_imu_accelerometer_z(accel.z.get::<milligravity>());
-        ner_can::send(self.can_tx, frame.to_can_frame()).await;
-    }
-
-    async fn send_angular_vel(&self, vel: AngularVelVec) {
-        let frame = cangen::ImuGyro::new()
-            .with_imu_gyro_x(vel.roll_rate.get::<mdps::millidegree_per_second>())
-            .with_imu_gyro_y(vel.pitch_rate.get::<mdps::millidegree_per_second>())
-            .with_imu_gyro_z(vel.yaw_rate.get::<mdps::millidegree_per_second>());
-        ner_can::send(self.can_tx, frame.to_can_frame()).await;
-    }
     async fn get_anguar_vel(&mut self) -> Option<AngularVelVec> {
         match self.imu.flag_data_ready_get().await {
             Ok(f) => {
                 let raw_rate = self.imu.angular_rate_raw_get().await;
                 if f.drdy_gy == 1 && raw_rate.is_ok() {
                     let vel = AngularVelVec::from_raws(raw_rate.unwrap());
-                    // info!("Current angular velocity: {}", vel);
                     Some(vel)
                 } else {
                     None
@@ -188,12 +164,10 @@ impl NerLsm6dsv16x {
         }
     }
     async fn init(&mut self) -> Result<(), ImuInitError> {
-        // All of this is ripped from the example code
         Timer::after_millis(5).await;
 
         // Check device ID
         let id = self.imu.device_id_get().await.unwrap();
-        // info!("Device ID: {:x}", id);
         if id != ID {
             error!("Unexpected device ID: {:x}", id);
             return Err(ImuInitError::WrongId);
@@ -244,23 +218,5 @@ impl NerLsm6dsv16x {
 
         info!("Configuration ended, check the output on the UART channel");
         Ok(())
-    }
-}
-
-/// Basically a self-contained task if all you need is to push data over CAN
-pub async fn imu_loop(spi: ImuSpi, can_tx: DynamicSender<'static, Frame>) -> ! {
-    let mut imu: NerLsm6dsv16x = NerLsm6dsv16x::new(spi, Delay, can_tx);
-    imu.init().await.expect("Failed to init IMU");
-    loop {
-        let latest_accel = imu.get_accel().await;
-        if latest_accel.is_some() {
-            imu.send_accel(latest_accel.unwrap()).await;
-        }
-        let latest_angular_vel = imu.get_anguar_vel().await;
-        if latest_angular_vel.is_some() {
-            imu.send_angular_vel(latest_angular_vel.unwrap()).await;
-        }
-
-        Timer::after_millis(50).await;
     }
 }
