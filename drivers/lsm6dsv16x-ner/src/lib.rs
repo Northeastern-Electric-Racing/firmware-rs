@@ -45,9 +45,9 @@ pub struct NerLsm6dsv16x<SPI: SpiDevice, D: DelayNs> {
 }
 
 pub struct AccelVec {
-    x: Acceleration,
-    y: Acceleration,
-    z: Acceleration,
+    pub x: Acceleration,
+    pub y: Acceleration,
+    pub z: Acceleration,
 }
 
 impl defmt::Format for AccelVec {
@@ -74,9 +74,9 @@ impl<E> From<LsmError<E>> for ImuInitError<E> {
 }
 
 pub struct AngularVelVec {
-    roll_rate: AngularVelocity,
-    pitch_rate: AngularVelocity,
-    yaw_rate: AngularVelocity,
+    pub roll_rate: AngularVelocity,
+    pub pitch_rate: AngularVelocity,
+    pub yaw_rate: AngularVelocity,
 }
 
 impl defmt::Format for AngularVelVec {
