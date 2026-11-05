@@ -2,7 +2,6 @@
 
 #[allow(dead_code)]
 use defmt::{error, info, warn};
-use embassy_time::Timer;
 use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::spi::SpiDevice;
 use lsm6dsv16x_rs::asynchronous::Error as LsmError;
@@ -93,14 +92,14 @@ impl defmt::Format for AngularVelVec {
 }
 
 impl AngularVelVec {
-    fn from_rads_per_s(p: f32, q: f32, r: f32) -> Self {
+    pub fn from_rads_per_s(p: f32, q: f32, r: f32) -> Self {
         AngularVelVec {
             roll_rate: AngularVelocity::new::<degree_per_second>(p),
             pitch_rate: AngularVelocity::new::<degree_per_second>(q),
             yaw_rate: AngularVelocity::new::<degree_per_second>(r),
         }
     }
-    fn from_raws(raws: [i16; 3]) -> Self {
+    pub fn from_raws(raws: [i16; 3]) -> Self {
         AngularVelVec {
             roll_rate: AngularVelocity::new::<millidegree_per_second>(raws[0] as f32),
             pitch_rate: AngularVelocity::new::<millidegree_per_second>(raws[1] as f32),
@@ -110,14 +109,14 @@ impl AngularVelVec {
 }
 
 impl AccelVec {
-    fn from_mps_sq(x: f32, y: f32, z: f32) -> Self {
+    pub fn from_mps_sq(x: f32, y: f32, z: f32) -> Self {
         AccelVec {
             x: Acceleration::new::<meter_per_second_squared>(x),
             y: Acceleration::new::<meter_per_second_squared>(y),
             z: Acceleration::new::<meter_per_second_squared>(z),
         }
     }
-    fn from_raws(raw: [i16; 3]) -> Self {
+    pub fn from_raws(raw: [i16; 3]) -> Self {
         use lsm6dsv16x_rs::asynchronous::from_fs2_to_mg;
         AccelVec {
             x: Acceleration::new::<milligravity>(from_fs2_to_mg(raw[0])),
@@ -133,7 +132,7 @@ impl<SPI: SpiDevice, D: DelayNs> NerLsm6dsv16x<SPI, D> {
         }
     }
 
-    async fn get_accel(&mut self) -> Option<AccelVec> {
+    pub async fn get_accel(&mut self) -> Option<AccelVec> {
         match self.imu.flag_data_ready_get().await {
             Ok(f) => {
                 let raw_accel = self.imu.acceleration_raw_get().await;
@@ -150,7 +149,7 @@ impl<SPI: SpiDevice, D: DelayNs> NerLsm6dsv16x<SPI, D> {
             }
         }
     }
-    async fn get_anguar_vel(&mut self) -> Option<AngularVelVec> {
+    pub async fn get_anguar_vel(&mut self) -> Option<AngularVelVec> {
         match self.imu.flag_data_ready_get().await {
             Ok(f) => {
                 let raw_rate = self.imu.angular_rate_raw_get().await;
@@ -167,7 +166,7 @@ impl<SPI: SpiDevice, D: DelayNs> NerLsm6dsv16x<SPI, D> {
             }
         }
     }
-    async fn init(&mut self) -> Result<(), ImuInitError<SPI::Error>> {
+    pub async fn init(&mut self) -> Result<(), ImuInitError<SPI::Error>> {
         self.imu.tim.delay_ms(5).await;
 
         // Check device ID
