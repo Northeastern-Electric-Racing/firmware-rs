@@ -6,6 +6,7 @@ use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::spi::SpiDevice;
 use lsm6dsv16x_rs::asynchronous::Error as LsmError;
 use lsm6dsv16x_rs::asynchronous::Lsm6dsv16x;
+use lsm6dsv16x_rs::asynchronous::from_fs2000_to_mdps;
 use lsm6dsv16x_rs::asynchronous::register::MainBank;
 use lsm6dsv16x_rs::asynchronous::register::main::FiltGyLp1Bandwidth;
 use lsm6dsv16x_rs::asynchronous::register::main::FiltSettlingMask;
@@ -92,7 +93,7 @@ impl defmt::Format for AngularVelVec {
 }
 
 impl AngularVelVec {
-    pub fn from_rads_per_s(p: f32, q: f32, r: f32) -> Self {
+    pub fn from_degs_per_s(p: f32, q: f32, r: f32) -> Self {
         AngularVelVec {
             roll_rate: AngularVelocity::new::<degree_per_second>(p),
             pitch_rate: AngularVelocity::new::<degree_per_second>(q),
@@ -101,9 +102,11 @@ impl AngularVelVec {
     }
     pub fn from_raws(raws: [i16; 3]) -> Self {
         AngularVelVec {
-            roll_rate: AngularVelocity::new::<millidegree_per_second>(raws[0] as f32),
-            pitch_rate: AngularVelocity::new::<millidegree_per_second>(raws[1] as f32),
-            yaw_rate: AngularVelocity::new::<millidegree_per_second>(raws[2] as f32),
+            roll_rate: AngularVelocity::new::<millidegree_per_second>(from_fs2000_to_mdps(raws[0])),
+            pitch_rate: AngularVelocity::new::<millidegree_per_second>(from_fs2000_to_mdps(
+                raws[1],
+            )),
+            yaw_rate: AngularVelocity::new::<millidegree_per_second>(from_fs2000_to_mdps(raws[2])),
         }
     }
 }
