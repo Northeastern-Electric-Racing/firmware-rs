@@ -145,7 +145,7 @@ fn crc8(data: [u8; 2]) -> u8 {
 /// Errors
 #[derive(Debug)]
 pub enum Error<E> {
-    /// Wrong CRC
+    /// Wrong CRC                                                           
     Crc,
     /// I2C bus error
     I2c(E),
