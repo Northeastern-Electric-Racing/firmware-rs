@@ -17,7 +17,9 @@ use lsm6dsv16x_rs::asynchronous::register::main::XlFullScale;
 use st_mems_bus::asynchronous::SpiBus;
 use uom::si::acceleration::meter_per_second_squared;
 use uom::si::angular_velocity::degree_per_second;
-use uom::si::f32::*;
+use uom::si::f32::Acceleration;
+use uom::si::f32::AngularVelocity;
+
 #[macro_use]
 extern crate uom;
 
