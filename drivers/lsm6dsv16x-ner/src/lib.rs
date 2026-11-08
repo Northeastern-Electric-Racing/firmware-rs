@@ -1,6 +1,5 @@
 #![no_std]
 
-#[allow(dead_code)]
 use defmt::{error, info, warn};
 use embedded_hal_async::delay::DelayNs;
 use embedded_hal_async::spi::SpiDevice;
@@ -40,7 +39,10 @@ pub mod mdps {
 }
 use mdps::millidegree_per_second;
 
+use crate::ImuInitError::TooManyLoops;
+
 const ID: u8 = 0x70;
+const MAX_LOOPS: u8 = 250;
 pub struct NerLsm6dsv16x<SPI: SpiDevice, D: DelayNs> {
     imu: Lsm6dsv16x<SpiBus<SPI>, D, MainBank>,
 }
@@ -66,6 +68,7 @@ impl defmt::Format for AccelVec {
 #[derive(Debug)]
 pub enum ImuInitError<E> {
     WrongId(u8),
+    TooManyLoops(u8),
     DriverError(LsmError<E>),
 }
 impl<E> From<LsmError<E>> for ImuInitError<E> {
@@ -182,8 +185,13 @@ impl<SPI: SpiDevice, D: DelayNs> NerLsm6dsv16x<SPI, D> {
         // Restore default configuration
         self.imu.reset_set(Reset::RestoreCtrlRegs).await?;
         let mut rst: Reset = Reset::RestoreCtrlRegs;
-        while rst != Reset::Ready {
+        let mut loop_counter = 0;
+        while rst != Reset::Ready && loop_counter < MAX_LOOPS {
             rst = self.imu.reset_get().await?;
+            loop_counter += 1;
+        }
+        if loop_counter >= MAX_LOOPS {
+            return Err(TooManyLoops(loop_counter));
         }
 
         // Enable Block Data Update
