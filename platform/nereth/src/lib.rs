@@ -41,7 +41,7 @@ use core::{cell::RefCell, str::FromStr};
 
 use defmt::{error, expect, unwrap, warn};
 use embassy_executor::Spawner;
-use embassy_net::{StackStorage, wire::IpCidr};
+use embassy_net::{StackStorage, StaticPool, wire::IpCidr};
 use embassy_stm32::{
     Peri, bind_interrupts,
     eth::{
@@ -57,9 +57,8 @@ use micropb::{MessageEncode, PbEncoder, size::max_encoded_size};
 use static_cell::StaticCell;
 use zenoh_embassy::EmbassyLinkManager;
 use zenoh_nostd::session::{
-    Endpoint, FixedCapacityGetCallbacks, FixedCapacityQueryableCallbacks,
-    FixedCapacitySubCallbacks, Publisher, Resources, Session, TransportLinkManager, ZSessionConfig,
-    zenoh::{connect, keyexpr, storage::RawOrBox},
+    zenoh::{keyexpr, storage::RawOrBox},
+    *,
 };
 
 mod serverdata {
@@ -201,16 +200,16 @@ async fn session_task(session: &'static Session<'static, ZenohConfig>) {
 
 fn write_lan8670_vendor_reg(sm: &mut impl StationManagement, reg: u16, val: u16) {
     // enable vendor specific access and address write
-    sm.smi_write(0, 0x0D, 0x1F);
+    let _ = sm.smi_write(0, 0x0D, 0x1F);
 
     // write address
-    sm.smi_write(0, 0x0E, reg);
+    let _ = sm.smi_write(0, 0x0E, reg);
 
     // write normal data, keep vendor specific location
-    sm.smi_write(0, 0x0D, 0x1F | 1 << 14);
+    let _ = sm.smi_write(0, 0x0D, 0x1F | 1 << 14);
 
     // write payload
-    sm.smi_write(0, 0x0E, val);
+    let _ = sm.smi_write(0, 0x0E, val);
 }
 
 impl<const ID: u8> NerEth<ID> {
@@ -236,7 +235,7 @@ impl<const ID: u8> NerEth<ID> {
         sma: Peri<'static, peripherals::ETH_SMA>,
         mdio: Peri<'static, impl MDIOPin<peripherals::ETH_SMA>>,
         mdc: Peri<'static, impl MDCPin<peripherals::ETH_SMA>>,
-    ) -> Self {
+    ) -> Option<Self> {
         static PACKETS: StaticCell<eth::PacketQueue<4, 4>> = StaticCell::new();
 
         let mut rng = rng::Rng::new_blocking(peri_rand);
@@ -249,7 +248,7 @@ impl<const ID: u8> NerEth<ID> {
         // for private networks this is chill
         let mac_addr: [u8; 6] = [0x6, 0x0, 0x0, 0x0, 0x0, ID];
 
-        let mut device = eth::Ethernet::new(
+        let mut device = match eth::Ethernet::new(
             PACKETS.init(eth::PacketQueue::<4, 4>::new()),
             peri_eth,
             ref_clk,
@@ -264,7 +263,13 @@ impl<const ID: u8> NerEth<ID> {
             mdio,
             mdc,
             IrqsEth,
-        );
+        ) {
+            Ok(o) => o,
+            Err(e) => {
+                error!("Could not initialize ethernet! {}", e);
+                return None;
+            }
+        };
 
         // embassy-stm32's eth v2 driver unconditionally configures the MAC for
         // 100 Mbps full duplex, but 10BASE-T1S (LAN8670) is always 10 Mbps
@@ -296,16 +301,16 @@ impl<const ID: u8> NerEth<ID> {
         write_lan8670_vendor_reg(device.phy_mut().station_management(), 0xCA01, 1 << 15);
 
         static STACK: StaticCell<StackStorage> = StaticCell::new();
-        let (stack, runner) = embassy_net::Stack::new(STACK.init(StackStorage::new()), seed);
+        static POOL: StaticPool<1514, 16> = StaticPool::new();
+        let (stack, runner) = embassy_net::Stack::new(STACK.init(StackStorage::new()), &POOL, seed);
 
         // Add the network interface to the stack.
         static DEVICE: StaticCell<Device> = StaticCell::new();
-        let iface = unwrap!(stack.add_iface(DEVICE.init(device)));
+        let iface = unwrap!(stack.add_iface_borrowed(DEVICE.init(device)));
         // We run our network on 10.0.0.0/24
-        unwrap!(iface.set_ip_addrs([IpCidr::new(
-            embassy_net::wire::IpAddress::v4(10, 0, 0, ID),
-            24,
-        )]));
+        unwrap!(
+            iface.set_ip_addrs([IpCidr::new(embassy_net::wire::IpAddr::v4(10, 0, 0, ID), 24,)])
+        );
 
         // Launch network task
         spawner.spawn(net_task(runner).unwrap());
@@ -314,26 +319,22 @@ impl<const ID: u8> NerEth<ID> {
         let ex = ZenohConfig {
             transports: TransportLinkManager::from(EmbassyLinkManager::new(stack)),
         };
-
-        static RESOURCES: static_cell::StaticCell<Resources<'static, ZenohConfig>> =
-            static_cell::StaticCell::new();
-        static CONFIG: static_cell::StaticCell<ZenohConfig> = static_cell::StaticCell::new();
-        let config = CONFIG.init(ex);
-        let resources = RESOURCES.init(Resources::default());
-
         // For now we UDP client all to TPU, making TPU required
         // this also makes inter-firmware comms NON-CRITICAL over Zenoh
         // TODO: peer connectivity or appoint critical node host (ex. VCU)
         let endpoint = Endpoint::try_from("udp/10.0.0.1:7447").unwrap();
 
-        static SESSION: static_cell::StaticCell<Session<'static, ZenohConfig>> =
-            static_cell::StaticCell::new();
-        let session: &'static Session<'static, ZenohConfig> =
-            SESSION.init(connect(resources, config, endpoint).await.unwrap());
+        // static SESSION: static_cell::StaticCell<Session<'static, ZenohConfig>> =
+        //     static_cell::StaticCell::new();
+        // let session: &'static Session<'static, ZenohConfig> =
+        //     SESSION.init(connect(resources, config, endpoint).await.unwrap());
+
+        let builder = zenoh::session!(static ZenohConfig: ex);
+        let session = unwrap!(builder.connect(endpoint).await);
 
         spawner.spawn(session_task(session).unwrap());
 
-        NerEth::<ID> { session }
+        Some(NerEth::<ID> { session })
     }
 
     /// Retreives a publisher to send data over a topic.
