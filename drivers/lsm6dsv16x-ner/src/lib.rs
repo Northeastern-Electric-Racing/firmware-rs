@@ -152,7 +152,7 @@ impl<SPI: SpiDevice, D: DelayNs> NerLsm6dsv16x<SPI, D> {
             }
         }
     }
-    pub async fn get_anguar_vel(&mut self) -> Option<AngularVelVec> {
+    pub async fn get_angular_vel(&mut self) -> Option<AngularVelVec> {
         match self.imu.flag_data_ready_get().await {
             Ok(f) => {
                 let raw_rate = self.imu.angular_rate_raw_get().await;
