@@ -57,6 +57,7 @@ pub mod voltage;
 ///
 /// See Table 43 on page 32, Table 44 on page 33, and Table 51 on page 38 of the datasheet.
 pub mod measurement {
+    use super::config_a::types::AccumulatorDepth;
     use bitfield_struct::bitfield;
 
     /// Declares a 16-bit signed result register with a fixed microvolt LSB.
@@ -108,10 +109,11 @@ pub mod measurement {
                 }
                 /// The averaged voltage in microvolts, for accumulator registers.
                 ///
-                /// Accumulators hold a sum of `accn` samples, where `accn` comes from
-                /// `accumulation_count(acci)` for the `ACCI` field in CFGA.
-                pub const fn averaged_microvolts(self, accn: u16) -> i32 {
-                    self.as_microvolts() / accn as i32
+                /// Accumulators hold a sum of `depth.samples()` readings, so pass the
+                /// `AccumulatorDepth` that `ACCI` in CFGA was set to -- not a sample count, which
+                /// is easy to pass an unrelated number for.
+                pub const fn averaged_microvolts(self, depth: AccumulatorDepth) -> i32 {
+                    self.as_microvolts() / depth.samples() as i32
                 }
             }
         };
@@ -136,7 +138,8 @@ pub mod measurement {
         /// I1ADC accumulated current (`I1ACC`). Signed 24-bit, 1 uV per code.
         ///
         /// This is a **sum**, not an average. To get the averaged shunt voltage, divide by `ACCN`,
-        /// which is `4 * (ACCI + 1)` for the `ACCI` field in CFGA -- see `averaged_microvolts`.
+        /// which is `AccumulatorDepth::samples()` for the `ACCI` field in CFGA -- see
+        /// `averaged_microvolts`.
         AccumulatedCurrent1, 1, 0x03FFFF, 0xFC0000
     );
     impl_measurement24!(
@@ -242,13 +245,5 @@ pub mod measurement {
         pub const fn as_millicelsius(self) -> i32 {
             (self.raw() as i32 * 2_000) / 41 - 267_000
         }
-    }
-
-    /// Number of samples the accumulators sum, for a given `ACCI` code from CFGA.
-    ///
-    /// Per `ACCI` in Table 70, `ACCN = 4 * (ACCI + 1)`. The accumulator registers hold a sum of
-    /// `ACCN` samples, so dividing by this is what turns one into an average.
-    pub const fn accumulation_count(acci: u8) -> u16 {
-        4 * (acci as u16 + 1)
     }
 }
