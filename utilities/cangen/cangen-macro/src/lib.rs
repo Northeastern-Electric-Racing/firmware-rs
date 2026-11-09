@@ -70,12 +70,14 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
             let name = struct_ident(m);
             let id = u32::from_str_radix(m.id.trim_start_matches("0x"), 16).unwrap();
             let ext = m.is_ext.unwrap_or(false);
+            let name_str = name.to_string();
             let layout = quote! {
                 (#ext, #id) => {
                     let _: () = <#name as CanMessage>::CHECK;
                     (
                         <#name as CanMessage>::LEN,
                         ::core::mem::size_of::<<#name as CanMessage>::Repr>(),
+                        #name_str,
                     )
                 }
             };
@@ -99,6 +101,21 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
         }
 
         impl Msg {
+            /// The CAN ID of this message.
+            #[inline]
+            pub const fn id(&self) -> Id {
+                match self {
+                    #( Msg::#names(_) => <#names as CanMessage>::ID, )*
+                }
+            }
+
+            #[inline]
+            pub const fn name(&self) -> &'static str {
+                match self {
+                    #( Msg::#names(_) => stringify!(#names), )*
+                }
+            }
+
             #[inline]
             pub fn decode<F: Frame>(frame: &F) -> Option<Self> {
                 if frame.is_remote_frame() {
@@ -112,7 +129,7 @@ pub fn generate_all_messages(_stream: TokenStream) -> TokenStream {
                     Id::Standard(s) => (false, s.as_raw() as u32),
                     Id::Extended(e) => (true, e.as_raw()),
                 };
-                let (len, repr_bytes) = match key {
+                let (len, repr_bytes, name) = match key {
                     #( #layout_arms )*
                     _ => return None,
                 };
@@ -573,7 +590,6 @@ fn build_struct(msg: CANMsg) -> proc_macro2::TokenStream {
             const ID: Id = #id_decl;
         }
         impl ToCanFrame for #struct_name {}
-        impl FromCanFrame for #struct_name {}
     };
 
     // Range-validating accessors for the saturating (scaled `f32`) fields.
