@@ -7,9 +7,9 @@ links = "boot_control"
 
 [dependencies]
 cortex-m = "0.7"
-embassy-boot = "0.7.0"
+embassy-boot.workspace = true
 embassy-stm32 = { workspace = true, features = ["dual-bank"] }
-embassy-sync = "0.8.0"
+embassy-sync.workspace = true
 
 [lints]
 workspace = true

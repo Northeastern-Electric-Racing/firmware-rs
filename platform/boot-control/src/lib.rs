@@ -7,7 +7,8 @@ use core::cell::RefCell;
 
 use embassy_boot::{AlignedBuffer, BlockingFirmwareState, FirmwareUpdaterConfig};
 use embassy_stm32::Peri;
-use embassy_stm32::flash::{Blocking, Flash, WRITE_SIZE};
+use embassy_stm32::flash::{Config, Flash, WRITE_SIZE};
+use embassy_stm32::mode::Blocking;
 use embassy_stm32::peripherals::FLASH;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
@@ -25,7 +26,7 @@ impl<'d> Bootloader<'d> {
     /// Own flash access for boot confirmation and entry requests.
     pub fn new(flash: Peri<'d, FLASH>) -> Self {
         Self {
-            flash: Mutex::new(RefCell::new(Flash::new_blocking(flash))),
+            flash: Mutex::new(RefCell::new(Flash::new_blocking(flash, Config::default()))),
         }
     }
 
