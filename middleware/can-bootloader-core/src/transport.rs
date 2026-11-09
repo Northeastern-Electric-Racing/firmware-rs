@@ -1,4 +1,4 @@
-//! CAN controller interface implemented by each board.
+//! CAN controller interface implemented by each platform.
 
 use embedded_can::Id;
 

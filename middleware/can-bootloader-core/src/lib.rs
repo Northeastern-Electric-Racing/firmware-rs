@@ -1,7 +1,7 @@
 #![no_std]
 
-//! CAN firmware-update bootloader logic shared across boards.
-//! Boards provide the CAN transport, flash partitions, `memory.x`, and application handoff.
+//! CAN firmware-update bootloader logic shared across platforms.
+//! Platforms provide the CAN transport, flash partitions, `memory.x`, and application handoff.
 
 mod flash;
 mod handlers;
