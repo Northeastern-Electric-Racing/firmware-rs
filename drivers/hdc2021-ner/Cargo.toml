@@ -1,0 +1,11 @@
+[package]
+name = "hdc2021-ner"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+embedded-hal-async.workspace = true
+defmt.workspace = true
+
+
+
