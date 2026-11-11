@@ -249,7 +249,7 @@ impl<const ID: u8> NerEth<ID> {
         let mac_addr: [u8; 6] = [0x6, 0x0, 0x0, 0x0, 0x0, ID];
 
         let mut device = match eth::Ethernet::new(
-            PACKETS.init(eth::PacketQueue::<4, 4>::new()),
+            PACKETS.init(eth::PacketQueue::<8, 8>::new()),
             peri_eth,
             ref_clk,
             crs,
@@ -301,7 +301,7 @@ impl<const ID: u8> NerEth<ID> {
         write_lan8670_vendor_reg(device.phy_mut().station_management(), 0xCA01, 1 << 15);
 
         static STACK: StaticCell<StackStorage> = StaticCell::new();
-        static POOL: StaticPool<1514, 16> = StaticPool::new();
+        static POOL: StaticPool<1520, 16, 8> = StaticPool::new();
         let (stack, runner) = embassy_net::Stack::new(STACK.init(StackStorage::new()), &POOL, seed);
 
         // Add the network interface to the stack.
