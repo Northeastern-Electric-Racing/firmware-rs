@@ -216,7 +216,7 @@ macro_rules! topics {
         id = $id:expr;
         $($name:ident => $key:literal, $unit:literal;)*
     ) => {
-        #[derive(Clone, Copy, VariantCount)]
+        #[derive(Clone, Copy)]
         pub enum Topic {
             $($name,)*
         }
@@ -226,7 +226,7 @@ macro_rules! topics {
 
             pub const COUNT: usize = [$(stringify!($name)),*].len();
 
-            async fn publishers(eth: &NerEth<ID>) -> [NerPublisher<'static>; Self::COUNT] {
+            async fn publishers(eth: &$crate::NerEth<Topic::ID>) -> [$crate::NerPublisher<'static>; Self::COUNT] {
                 [$(
                     eth.get_publisher($key, Some($unit))
                         .await
