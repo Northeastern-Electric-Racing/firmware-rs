@@ -42,16 +42,12 @@ use core::{cell::RefCell, str::FromStr};
 use defmt::{error, expect, unwrap, warn};
 use embassy_executor::Spawner;
 use embassy_net::{StackStorage, StaticPool, wire::IpCidr};
-use embassy_stm32::{
-    Peri, bind_interrupts,
-    eth::{
-        self, CRSPin, Ethernet, GenericPhy, MDCPin, MDIOPin, RXD0Pin, RXD1Pin, RefClkPin, Sma,
-        StationManagement, TXD0Pin, TXD1Pin, TXEnPin,
-    },
-    mode::Blocking,
-    peripherals::{self, ETH_SMA},
-    rng,
-};
+use embassy_stm32::{Peri, bind_interrupts, rng};
+use embassy_stm32::eth::{self, CRSPin, Ethernet, GenericPhy};
+use embassy_stm32::eth::{MDCPin, MDIOPin, RXD0Pin, RXD1Pin, RefClkPin};
+use embassy_stm32::eth::{Sma, StationManagement, TXD0Pin, TXD1Pin, TXEnPin};
+use embassy_stm32::mode::Blocking;
+use embassy_stm32::peripherals::{self, ETH_SMA};
 use embassy_sync::blocking_mutex::{Mutex as BlockingMutex, raw::ThreadModeRawMutex};
 use micropb::{MessageEncode, PbEncoder, size::max_encoded_size};
 use static_cell::StaticCell;
@@ -210,6 +206,33 @@ fn write_lan8670_vendor_reg(sm: &mut impl StationManagement, reg: u16, val: u16)
 
     // write payload
     let _ = sm.smi_write(0, 0x0E, val);
+}
+
+/// Defines every Ethernet topic in one place.
+/// Generates the `Topic` enum and a matching (key, unit) table, in the same order.
+#[macro_export]
+macro_rules! topics {
+    ($($name:ident => $key:literal, $unit:literal;)*) => {
+        #[derive(Clone, Copy, VariantCount)]
+        pub enum Topic {
+            $($name,)*
+        }
+
+        impl Topic {
+            async fn publishers(eth: &NerEth<ID>) -> [NerPublisher<'static>; Self::VARIANT_COUNT] {
+                [$(
+                    eth.get_publisher($key, Some($unit))
+                        .await
+                        .unwrap_or_else(|| defmt::panic!("Failed to create publisher for {}", $key)),
+                )*]
+            }
+        }
+
+        pub struct Packet<const SIZE: usize> {
+            pub topic: Topic,
+            pub values: [f32; SIZE],
+        }
+    };
 }
 
 impl<const ID: u8> NerEth<ID> {
