@@ -212,14 +212,21 @@ fn write_lan8670_vendor_reg(sm: &mut impl StationManagement, reg: u16, val: u16)
 /// Generates the `Topic` enum and a matching (key, unit) table, in the same order.
 #[macro_export]
 macro_rules! topics {
-    ($($name:ident => $key:literal, $unit:literal;)*) => {
+    (
+        id = $id:expr;
+        $($name:ident => $key:literal, $unit:literal;)*
+    ) => {
         #[derive(Clone, Copy, VariantCount)]
         pub enum Topic {
             $($name,)*
         }
 
         impl Topic {
-            async fn publishers(eth: &NerEth<ID>) -> [NerPublisher<'static>; Self::VARIANT_COUNT] {
+            pub const ID: u8 = $id;
+
+            pub const COUNT: usize = [$(stringify!($name)),*].len();
+
+            async fn publishers(eth: &NerEth<ID>) -> [NerPublisher<'static>; Self::COUNT] {
                 [$(
                     eth.get_publisher($key, Some($unit))
                         .await
