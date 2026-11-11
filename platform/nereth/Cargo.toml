@@ -15,9 +15,9 @@ getrandom = { version = "0.2", default-features = false, features = ["custom"] }
 zenoh-nostd = { git = "https://github.com/Northeastern-Electric-Racing/zenoh-nostd", rev = "4efdaa2b9fa443784723dc0da2e31219beac5a1f", features = ["embedded", "defmt"] }
 zenoh-embassy = { git = "https://github.com/Northeastern-Electric-Racing/zenoh-nostd", rev = "4efdaa2b9fa443784723dc0da2e31219beac5a1f" }
 
-micropb = { version = "0.6.0", features = ["container-heapless-0-9"] }
+micropb = { version = "0.7.0", features = ["container-heapless-0-9"] }
 heapless = "0.9"
 
 [build-dependencies]
-micropb-gen = "0.6.0"
-protox = "0.9"
+micropb-gen = "0.7.0"
+protox = "0.10"
