@@ -236,7 +236,7 @@ impl<const ID: u8> NerEth<ID> {
         mdio: Peri<'static, impl MDIOPin<peripherals::ETH_SMA>>,
         mdc: Peri<'static, impl MDCPin<peripherals::ETH_SMA>>,
     ) -> Option<Self> {
-        static PACKETS: StaticCell<eth::PacketQueue<4, 4>> = StaticCell::new();
+        static PACKETS: StaticCell<eth::PacketQueue<8, 8>> = StaticCell::new();
 
         let mut rng = rng::Rng::new_blocking(peri_rand);
         let mut seed = [0; 8];
