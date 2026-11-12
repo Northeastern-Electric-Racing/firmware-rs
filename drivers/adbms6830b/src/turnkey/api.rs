@@ -3,6 +3,7 @@
 //! This driver uses the term "logical order" a lot because that's what claude kept using. For these
 //! purposes, "logical order" is the order of chips from the POV of Line A.
 
+use crate::spi_timing::BusIdle;
 use embedded_hal_async::spi::SpiDevice;
 
 use crate::chip::commands::{self, Command, CommandFrame};
@@ -241,9 +242,9 @@ impl From<OnLineA> for usize {
 /// Two isoSPI lines reaching `N` chips, plus the state tracked for those chips.
 ///
 #[doc = docs::isospi_indexing_example!()]
-pub struct Api<SPI, const N: usize> {
-    line_a: Line<SPI, N>,
-    line_b: Line<SPI, N>,
+pub struct Api<SPI, DELAY, const N: usize> {
+    line_a: Line<SPI, DELAY, N>,
+    line_b: Line<SPI, DELAY, N>,
     on_line_a: OnLineA,
     /// State metadata for each chip
     pub(crate) chips: [ChipState; N],
@@ -263,7 +264,7 @@ pub struct Api<SPI, const N: usize> {
 }
 
 /// isoSPI recovery!
-impl<SPI: SpiDevice, const N: usize> Api<SPI, N> {
+impl<SPI: SpiDevice, DELAY: BusIdle, const N: usize> Api<SPI, DELAY, N> {
     /// PRIVATE! Helper that overwrites the provided ConfigAs with the current split's COMM_BK setting.
     fn overwrite_configa_with_split(&mut self, configs: &mut [ConfigA; N]) {
         use crate::chip::registers::config_a::types::CommunicationBreak;
@@ -368,7 +369,7 @@ impl<SPI: SpiDevice, const N: usize> Api<SPI, N> {
 }
 
 #[cfg(feature = "defmt")]
-impl<SPI, const N: usize> defmt::Format for Api<SPI, N> {
+impl<SPI, DELAY, const N: usize> defmt::Format for Api<SPI, DELAY, N> {
     fn format(&self, f: defmt::Formatter) {
         defmt::write!(
             f,
@@ -379,9 +380,9 @@ impl<SPI, const N: usize> defmt::Format for Api<SPI, N> {
     }
 }
 
-impl<SPI: SpiDevice, const N: usize> Api<SPI, N> {
+impl<SPI: SpiDevice, DELAY: BusIdle, const N: usize> Api<SPI, DELAY, N> {
     /// Builds a Api. This defaults to every chip routed to line A.
-    pub(crate) const fn new(line_a: Line<SPI, N>, line_b: Line<SPI, N>) -> Self {
+    pub(crate) const fn new(line_a: Line<SPI, DELAY, N>, line_b: Line<SPI, DELAY, N>) -> Self {
         Self {
             line_a,
             line_b,
@@ -401,9 +402,9 @@ impl<SPI: SpiDevice, const N: usize> Api<SPI, N> {
         }
     }
 
-    /// Releases both lines' SPI devices.
+    /// Releases both lines' SPI devices and delays.
     #[allow(dead_code)]
-    pub(crate) fn release(self) -> (SPI, SPI) {
+    pub(crate) fn release(self) -> ((SPI, DELAY), (SPI, DELAY)) {
         (self.line_a.release(), self.line_b.release())
     }
 
@@ -467,7 +468,7 @@ impl<SPI: SpiDevice, const N: usize> Api<SPI, N> {
     }
 
     /// PRIVATE! Gets a mut reference to a Line
-    fn line_mut(&mut self, line: LineId) -> &mut Line<SPI, N> {
+    fn line_mut(&mut self, line: LineId) -> &mut Line<SPI, DELAY, N> {
         match line {
             LineId::A => &mut self.line_a,
             LineId::B => &mut self.line_b,
@@ -787,7 +788,7 @@ impl<SPI: SpiDevice, const N: usize> Api<SPI, N> {
 ///
 /// Each helper starts a conversion, waits the time it is expected to take, and then polls until every
 /// chip reports that it's finished.
-impl<SPI: SpiDevice, const N: usize> Api<SPI, N> {
+impl<SPI: SpiDevice, DELAY: BusIdle, const N: usize> Api<SPI, DELAY, N> {
     /// Sends the `start` command, waits `conversion_ms` milliseconds, and then polls until done (or `timeout_ms` elapses).
     async fn autoconvert(
         &mut self,
