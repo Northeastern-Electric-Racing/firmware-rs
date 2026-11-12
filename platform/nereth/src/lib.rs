@@ -42,16 +42,12 @@ use core::{cell::RefCell, str::FromStr};
 use defmt::{error, expect, unwrap, warn};
 use embassy_executor::Spawner;
 use embassy_net::{StackStorage, StaticPool, wire::IpCidr};
-use embassy_stm32::{
-    Peri, bind_interrupts,
-    eth::{
-        self, CRSPin, Ethernet, GenericPhy, MDCPin, MDIOPin, RXD0Pin, RXD1Pin, RefClkPin, Sma,
-        StationManagement, TXD0Pin, TXD1Pin, TXEnPin,
-    },
-    mode::Blocking,
-    peripherals::{self, ETH_SMA},
-    rng,
-};
+use embassy_stm32::eth::{self, CRSPin, Ethernet, GenericPhy};
+use embassy_stm32::eth::{MDCPin, MDIOPin, RXD0Pin, RXD1Pin, RefClkPin};
+use embassy_stm32::eth::{Sma, StationManagement, TXD0Pin, TXD1Pin, TXEnPin};
+use embassy_stm32::mode::Blocking;
+use embassy_stm32::peripherals::{self, ETH_SMA};
+use embassy_stm32::{Peri, bind_interrupts, rng};
 use embassy_sync::blocking_mutex::{Mutex as BlockingMutex, raw::ThreadModeRawMutex};
 use micropb::{MessageEncode, PbEncoder, size::max_encoded_size};
 use static_cell::StaticCell;
@@ -212,6 +208,35 @@ fn write_lan8670_vendor_reg(sm: &mut impl StationManagement, reg: u16, val: u16)
     let _ = sm.smi_write(0, 0x0E, val);
 }
 
+/// Defines every Ethernet topic in one place.
+/// Generates the `Topic` enum and a matching (key, unit) table, in the same order.
+#[macro_export]
+macro_rules! topics {
+    ($($name:ident => $key:literal, $unit:literal;)*) => {
+        #[derive(Clone, Copy)]
+        pub enum Topic {
+            $($name,)*
+        }
+
+        impl Topic {
+            pub const COUNT: usize = [$(stringify!($name)),*].len();
+
+            async fn publishers<const ID: u8>(eth: &$crate::NerEth<ID>) -> [$crate::NerPublisher<'static>; Self::COUNT] {
+                [$(
+                    eth.get_publisher($key, Some($unit))
+                        .await
+                        .unwrap_or_else(|| defmt::panic!("Failed to create publisher for {}", $key)),
+                )*]
+            }
+        }
+
+        pub struct Packet<const SIZE: usize> {
+            pub topic: Topic,
+            pub values: [f32; SIZE],
+        }
+    };
+}
+
 impl<const ID: u8> NerEth<ID> {
     const _ASSERT_VALID_SIZE: () = {
         assert!(ID > 0, "ID must not be zero!");
@@ -236,7 +261,7 @@ impl<const ID: u8> NerEth<ID> {
         mdio: Peri<'static, impl MDIOPin<peripherals::ETH_SMA>>,
         mdc: Peri<'static, impl MDCPin<peripherals::ETH_SMA>>,
     ) -> Option<Self> {
-        static PACKETS: StaticCell<eth::PacketQueue<4, 4>> = StaticCell::new();
+        static PACKETS: StaticCell<eth::PacketQueue<8, 8>> = StaticCell::new();
 
         let mut rng = rng::Rng::new_blocking(peri_rand);
         let mut seed = [0; 8];
@@ -249,7 +274,7 @@ impl<const ID: u8> NerEth<ID> {
         let mac_addr: [u8; 6] = [0x6, 0x0, 0x0, 0x0, 0x0, ID];
 
         let mut device = match eth::Ethernet::new(
-            PACKETS.init(eth::PacketQueue::<4, 4>::new()),
+            PACKETS.init(eth::PacketQueue::<8, 8>::new()),
             peri_eth,
             ref_clk,
             crs,
@@ -301,7 +326,7 @@ impl<const ID: u8> NerEth<ID> {
         write_lan8670_vendor_reg(device.phy_mut().station_management(), 0xCA01, 1 << 15);
 
         static STACK: StaticCell<StackStorage> = StaticCell::new();
-        static POOL: StaticPool<1514, 16> = StaticPool::new();
+        static POOL: StaticPool<1520, 16, 8> = StaticPool::new();
         let (stack, runner) = embassy_net::Stack::new(STACK.init(StackStorage::new()), &POOL, seed);
 
         // Add the network interface to the stack.
