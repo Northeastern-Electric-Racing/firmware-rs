@@ -1,3 +1,3 @@
 [submodule "utilities/cangen/Odyssey-Definitions"]
 	path = utilities/cangen/cangen-macro/Odyssey-Definitions
-	url = https://github.com/Northeastern-Electric-Racing/Odyssey-Definitions/tree/energy-meter-temperature-msg
+	url = https://github.com/Northeastern-Electric-Racing/Odyssey-Definitions/tree/energy-meter-temperature-msg.git
