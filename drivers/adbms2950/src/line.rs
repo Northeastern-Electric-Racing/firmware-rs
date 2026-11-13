@@ -429,6 +429,21 @@ pub mod conversion_times {
     /// this multiplied by `ACCN`.
     pub const IXADC_CONVERSION_MS: u32 = 1;
 
+    /// IxADC and VBxADC conversion time, in nanoseconds.
+    ///
+    /// The same figure as [`IXADC_CONVERSION_MS`]. Timing a conversion against a host clock needs
+    /// finer units than whole milliseconds, and deriving them at each call site means repeating a
+    /// unit conversion of a datasheet quantity.
+    pub const IXADC_CONVERSION_NS: u32 = IXADC_CONVERSION_MS * 1_000_000;
+
+    /// Worst-case deviation of the IxADC conversion time from nominal, as a percentage.
+    ///
+    /// The oscillator tolerance the datasheet allows, so a conversion time measured against a host
+    /// clock should land inside this band. Outside it, the measurement is more likely a desynced
+    /// counter than real drift -- how far outside to tolerate before saying so is the caller's
+    /// policy, not a datasheet figure.
+    pub const IXADC_CONVERSION_TOLERANCE_PERCENT: u32 = 10;
+
     /// V1ADC/V2ADC single conversion with no soak time. Typical 265 us, maximum 292 us.
     ///
     /// A round-robin `ADV` takes this per channel, and any `SOAK` time configured in CFGA is
