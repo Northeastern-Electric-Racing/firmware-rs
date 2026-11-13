@@ -1,0 +1,16 @@
+[package]
+name = "can-bootloader-core"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+crc = { version = "3.3", default-features = false }
+defmt.workspace = true
+embassy-boot.workspace = true
+embassy-time.workspace = true
+embedded-can.workspace = true
+embedded-storage = "0.3.1"
+
+[lints]
+workspace = true
