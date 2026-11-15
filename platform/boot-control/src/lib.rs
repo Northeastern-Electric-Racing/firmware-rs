@@ -17,6 +17,12 @@ pub use embassy_boot::FirmwareUpdaterError;
 
 const BOOT_REQUEST_DATA: &[u8] = &[0xB0, 0x07, 0x10, 0xAD];
 
+/// Returns whether boot-request frame data is a valid bootloader entry request.
+/// The caller must match the request ID and reject remote frames first.
+pub fn is_valid_request(data: &[u8]) -> bool {
+    data == BOOT_REQUEST_DATA
+}
+
 /// Own flash access for startup confirmation and persistent bootloader requests.
 pub struct Bootloader<'d> {
     flash: Mutex<NoopRawMutex, RefCell<Flash<'d, Blocking>>>,
@@ -36,16 +42,13 @@ impl<'d> Bootloader<'d> {
         self.write_state(false)
     }
 
-    /// Validate boot-request data, persist the request, and reset.
-    /// The caller must match the request ID and reject remote frames first.
-    /// Invalid data is ignored; a failed state write returns without resetting.
-    /// Call after any application-specific shutdown needed before reset.
-    pub fn handle_request(&mut self, data: &[u8]) -> Result<(), FirmwareUpdaterError> {
-        if data == BOOT_REQUEST_DATA {
-            self.write_state(true)?;
-            cortex_m::peripheral::SCB::sys_reset();
-        }
-        Ok(())
+    /// Persist the bootloader entry request and reset.
+    /// Check the request with `is_valid_request` and run any cleanup first.
+    /// Resets even if the state write fails, so the application restarts after its cleanup.
+    pub fn enter_bootloader(&mut self) -> ! {
+        // A failed write leaves no entry request, so the reset starts the application.
+        let _ = self.write_state(true);
+        cortex_m::peripheral::SCB::sys_reset();
     }
 
     // Read the partitions from the linker symbols in memory.x on each write,
