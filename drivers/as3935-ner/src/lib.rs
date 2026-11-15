@@ -1,6 +1,9 @@
 //! an SPI driver for an as3935 sensor found on the lightning board
 #![no_std]
 
+mod chip;
+
+use crate::chip::registers::Register;
 use embedded_hal_async::spi::SpiDevice;
 
 /// Register addresses are 6 bits (B13–B8 of the SPI frame).
@@ -19,16 +22,16 @@ impl<SPI> As3935<SPI>
         Self {spi}
     }
 
-    async fn read_register(&mut self, addr: u8) -> Result<u8, Error<SPI::Error>> {
-        let command_byte = (addr & ADDRESS_MASK) | 0x40;
+    async fn read_register(&mut self, reg: Register) -> Result<u8, Error<SPI::Error>> {
+        let command_byte = (reg as u8 & ADDRESS_MASK) | 0x40;
         let mut buf: [u8; 2] = [command_byte, 0x00];
 
         SpiDevice::transfer_in_place(&mut self.spi, &mut buf).await.map_err(Error::Spi)?;
         Ok(buf[1])
     }
 
-    async fn write_register(&mut self, addr: u8, value: u8) -> Result<(), Error<SPI::Error>> {
-        let command_byte = (addr & ADDRESS_MASK) | 0x00; // write mode will always be 0x00 so the OR does nothing
+    async fn write_register(&mut self, reg: Register, value: u8) -> Result<(), Error<SPI::Error>> {
+        let command_byte = (reg as u8 & ADDRESS_MASK) | 0x00; // write mode will always be 0x00 so the OR does nothing
         let buf: [u8; 2] = [command_byte, value];
 
         SpiDevice::write(&mut self.spi, &buf).await.map_err(Error::Spi)?;
@@ -41,4 +44,3 @@ pub enum Error<E> {
     /// SPI hardware failed error
     Spi(E),
 }
-
