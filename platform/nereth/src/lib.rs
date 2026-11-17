@@ -264,12 +264,11 @@ macro_rules! topics {
         impl Topic {
             pub const COUNT: usize = [$(stringify!($name)),*].len();
 
-            async fn publishers<const ID: u8>(eth: &$crate::NerEth<ID>) -> [$crate::NerPublisher<'static>; Self::COUNT] {
-                [$(
-                    eth.get_publisher($key, Some($unit))
-                        .await
-                        .unwrap_or_else(|| defmt::error!("Failed to create publisher for {}", $key)),
-                )*]
+            async fn publishers<const ID: u8>(eth: &$crate::NerEth<ID>)
+                -> Option<[$crate::NerPublisher<'static>; Self::COUNT]> {
+                Some([$(
+                    eth.get_publisher($key, Some($unit)).await?,
+                )*])
             }
         }
 
