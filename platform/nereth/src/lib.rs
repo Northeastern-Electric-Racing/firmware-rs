@@ -1,41 +1,85 @@
 #![no_std]
-//! The NER Ethernet Handler.
-//! Takes in an ethernet peripheral and pins, and handles all setup.
-//! The NER Ethernet stack currently includes a LAN8670 running in PLCA mode.
-//! On top of the PLCA mode we run Zenoh to communicate data.
-//! We also run PTP over UDP to synchronize time effectively.
+//! NER Ethernet handler.
 //!
-//! ## ID
-//! The generic ID sources the various identifiers:
-//!  - The IP is `10.0.0.ID`
-//!  - The mac is `06:00:00:00:00:ID`
-//!  - The PLCA node is `ID-1`
+//! Takes the STM32 Ethernet peripheral and pins and brings up the whole stack:
 //!
-//! Therefore an ID of 0 is disallowed, and an ID of one assumes PLCA coordinator.
+//! - **PHY:** a Microchip LAN8670 (10BASE-T1S) configured for PLCA.
+//! - **Network:** `embassy-net` with a static IPv4 address on `10.0.0.0/24`.
+//! - **Messaging:** a Zenoh client session over UDP to the TPU at `10.0.0.1:7447`.
+//!   Payloads are protobuf `ServerData` messages encoded with `micropb`.
 //!
+//! Timestamps are not set yet (`time_us` is always 0). PTP time sync is planned.
 //!
-//! Example initilization of ethernet using this crate's utilities:
+//! # Node ID
+//!
+//! The const generic `ID` sets every per-node identifier:
+//!
+//! | Identifier | Value                                      |
+//! |------------|--------------------------------------------|
+//! | IPv4       | `10.0.0.ID`                                |
+//! | MAC        | `06:00:00:00:00:ID` (locally administered) |
+//! | PLCA node  | `ID - 1`                                   |
+//!
+//! `ID` must be between 1 and 8 (the PLCA node count). ID 1 is PLCA node 0,
+//! the coordinator.
+//!
+//! # Usage
+//!
+//! 1. Reset the PHY. This crate does not do it, and the board may be warm
+//!    booting with the PHY in an unknown state.
+//! 2. Call [`NerEth::new`] once. It spawns the network and Zenoh session tasks.
+//! 3. Declare the node's topics with [`topics!`] and create their publishers
+//!    with `Topic::publishers`.
+//! 4. Publish from a single task that owns the publishers, and feed it from the
+//!    rest of the firmware through a channel.
+//!
+//! ```ignore
+//! use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
+//! use nereth::{NerEth, topics};
+//!
+//! topics! {
+//!     Acceleration => "VCU_Ethernet/A/Acceleration", "mg";
+//!     Gyro         => "VCU_Ethernet/A/Gyro",         "mdps";
+//! }
+//!
+//! // Other tasks drop packets in here. `try_send` never blocks, so a dead or
+//! // missing Ethernet link can't stall them; packets are just dropped.
+//! pub static OUTGOING: Channel<CriticalSectionRawMutex, Packet<3>, 8> = Channel::new();
+//!
+//! pub fn try_publish(topic: Topic, values: [f32; 3]) -> bool {
+//!     OUTGOING.try_send(Packet { topic, values }).is_ok()
+//! }
+//!
+//! // `r` is the board's struct of Ethernet peripherals and pins.
+//! #[embassy_executor::task]
+//! async fn ethernet_task(spawner: Spawner, r: EthernetResources) {
+//!     // Hold the PHY in reset for 500 ms.
+//!     let mut phy_reset = Output::new(r.phy_reset, Level::Low, Speed::Low);
+//!     Timer::after_millis(500).await;
+//!     phy_reset.set_high();
+//!
+//!     let Ok(eth) = NerEth::<4>::new(
+//!         spawner, r.rng, r.eth, r.ref_clk, r.crs, r.rx_d0, r.rx_d1,
+//!         r.tx_d0, r.tx_d1, r.tx_en, r.sma, r.mdio, r.mdc,
+//!     )
+//!     .await
+//!     else {
+//!         defmt::error!("Ethernet init failed; running without Ethernet");
+//!         return;
+//!     };
+//!
+//!     // One publisher per topic, in declaration order.
+//!     let mut publishers = Topic::publishers(&eth).await;
+//!
+//!     loop {
+//!         let packet = OUTGOING.receive().await;
+//!         // Failures are logged inside `send_values`.
+//!         let _ = publishers[packet.topic as usize]
+//!             .send_values(packet.values)
+//!             .await;
+//!     }
+//! }
 //! ```
-//! // First the PHY must be reset -- this handler does not take care of that.
-//! // Make sure to reset on boot, as this might not be a cold boot
-//! let mut phy_reset = Output::new(p.PE10, Level::Low, Speed::Low);
-//! phy_reset.set_low();
-//! Timer::after_millis(500).await;
-//! phy_reset.set_high();
-//!
-//! // Now we initialize the stack
-//!
-//! let nereth = nereth::NerEth::<1>::new(
-//! _spawner, p.RNG, p.ETH, p.PA1, p.PA7, p.PC4, p.PC5, p.PB12, p.PB15, p.PA5,
-//! p.ETH_SMA, p.PA2, p.PC1).await;
-//!
-//!
-//! // Use the returned object to retrieve the data channels for rx/tx and get time
-//!
-//! ```
-//!
-//!
-//!
 
 use core::{cell::RefCell, str::FromStr};
 
@@ -224,7 +268,7 @@ macro_rules! topics {
                 [$(
                     eth.get_publisher($key, Some($unit))
                         .await
-                        .unwrap_or_else(|| defmt::panic!("Failed to create publisher for {}", $key)),
+                        .unwrap_or_else(|| defmt::error!("Failed to create publisher for {}", $key)),
                 )*]
             }
         }
@@ -236,6 +280,7 @@ macro_rules! topics {
     };
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, defmt::Format)]
 pub enum NerEthError {
     EthernetInitError,
     DeviceInitError,
