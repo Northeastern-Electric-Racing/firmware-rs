@@ -39,23 +39,22 @@
 
 use core::{cell::RefCell, str::FromStr};
 
-use defmt::{error, expect, unwrap, warn};
+use defmt::{error, warn};
 use embassy_executor::Spawner;
 use embassy_net::{StackStorage, StaticPool, wire::IpCidr};
 use embassy_stm32::eth::{self, CRSPin, Ethernet, GenericPhy};
 use embassy_stm32::eth::{MDCPin, MDIOPin, RXD0Pin, RXD1Pin, RefClkPin};
 use embassy_stm32::eth::{Sma, StationManagement, TXD0Pin, TXD1Pin, TXEnPin};
 use embassy_stm32::mode::Blocking;
-use embassy_stm32::peripherals::{self, ETH_SMA};
+use embassy_stm32::peripherals;
 use embassy_stm32::{Peri, bind_interrupts, rng};
 use embassy_sync::blocking_mutex::{Mutex as BlockingMutex, raw::ThreadModeRawMutex};
 use micropb::{MessageEncode, PbEncoder, size::max_encoded_size};
 use static_cell::StaticCell;
 use zenoh_embassy::EmbassyLinkManager;
-use zenoh_nostd::session::{
-    zenoh::{keyexpr, storage::RawOrBox},
-    *,
-};
+use zenoh_nostd::session::zenoh::keyexpr;
+use zenoh_nostd::session::zenoh::storage::RawOrBox;
+use zenoh_nostd::session::*;
 
 mod serverdata {
     #![allow(clippy::all)]
@@ -69,7 +68,7 @@ pub type ServerData = serverdata::serverdata_::v2_::ServerData;
 
 const CAPACITY: usize = max_encoded_size::<ServerData>().next_power_of_two();
 
-type Device = Ethernet<'static, peripherals::ETH, GenericPhy<Sma<'static, ETH_SMA>>>;
+type Device = Ethernet<'static, peripherals::ETH, GenericPhy<Sma<'static, peripherals::ETH_SMA>>>;
 
 // max PLCA nodes (coordinator MUST set this number)
 const MAX_NODES: u8 = 8;
@@ -150,7 +149,7 @@ impl<'a> NerPublisher<'a> {
     }
 }
 
-type LinkManager = zenoh_embassy::EmbassyLinkManager<'static, 512, 3>;
+type LinkManager = EmbassyLinkManager<'static, 512, 3>;
 
 pub struct NerEth<const ID: u8> {
     session: &'static Session<'static, ZenohConfig>,
@@ -162,9 +161,9 @@ pub struct ZenohConfig {
 
 const BUFF_SIZE: u16 = 512u16;
 impl ZSessionConfig for ZenohConfig {
-    type LinkManager = LinkManager;
-
     type Buff = [u8; BUFF_SIZE as usize];
+
+    type LinkManager = LinkManager;
 
     type SubCallbacks<'res> = FixedCapacitySubCallbacks<'res, 8, RawOrBox<56>, RawOrBox<600>>;
 
@@ -237,6 +236,13 @@ macro_rules! topics {
     };
 }
 
+pub enum NerEthError {
+    EthernetInitError,
+    DeviceInitError,
+    SetIpError,
+    ConnectionError,
+}
+
 impl<const ID: u8> NerEth<ID> {
     const _ASSERT_VALID_SIZE: () = {
         assert!(ID > 0, "ID must not be zero!");
@@ -260,7 +266,7 @@ impl<const ID: u8> NerEth<ID> {
         sma: Peri<'static, peripherals::ETH_SMA>,
         mdio: Peri<'static, impl MDIOPin<peripherals::ETH_SMA>>,
         mdc: Peri<'static, impl MDCPin<peripherals::ETH_SMA>>,
-    ) -> Option<Self> {
+    ) -> Result<Self, NerEthError> {
         static PACKETS: StaticCell<eth::PacketQueue<8, 8>> = StaticCell::new();
 
         let mut rng = rng::Rng::new_blocking(peri_rand);
@@ -273,7 +279,7 @@ impl<const ID: u8> NerEth<ID> {
         // for private networks this is chill
         let mac_addr: [u8; 6] = [0x6, 0x0, 0x0, 0x0, 0x0, ID];
 
-        let mut device = match eth::Ethernet::new(
+        let mut device = match Ethernet::new(
             PACKETS.init(eth::PacketQueue::<8, 8>::new()),
             peri_eth,
             ref_clk,
@@ -292,7 +298,7 @@ impl<const ID: u8> NerEth<ID> {
             Ok(o) => o,
             Err(e) => {
                 error!("Could not initialize ethernet! {}", e);
-                return None;
+                return Err(NerEthError::EthernetInitError);
             }
         };
 
@@ -331,14 +337,20 @@ impl<const ID: u8> NerEth<ID> {
 
         // Add the network interface to the stack.
         static DEVICE: StaticCell<Device> = StaticCell::new();
-        let iface = unwrap!(stack.add_iface_borrowed(DEVICE.init(device)));
+        let Ok(iface) = stack.add_iface_borrowed(DEVICE.init(device)) else {
+            return Err(NerEthError::DeviceInitError);
+        };
         // We run our network on 10.0.0.0/24
-        unwrap!(
-            iface.set_ip_addrs([IpCidr::new(embassy_net::wire::IpAddr::v4(10, 0, 0, ID), 24,)])
-        );
+
+        if iface
+            .set_ip_addrs([IpCidr::new(embassy_net::wire::IpAddr::v4(10, 0, 0, ID), 24)])
+            .is_err()
+        {
+            return Err(NerEthError::SetIpError);
+        }
 
         // Launch network task
-        spawner.spawn(net_task(runner).unwrap());
+        spawner.spawn(net_task(runner).expect("Failed to spawn embassy_net::net_task()."));
 
         // ZENOH ---------------------------------------------------------------
         let ex = ZenohConfig {
@@ -347,7 +359,8 @@ impl<const ID: u8> NerEth<ID> {
         // For now we UDP client all to TPU, making TPU required
         // this also makes inter-firmware comms NON-CRITICAL over Zenoh
         // TODO: peer connectivity or appoint critical node host (ex. VCU)
-        let endpoint = Endpoint::try_from("udp/10.0.0.1:7447").unwrap();
+        let endpoint = Endpoint::try_from("udp/10.0.0.1:7447")
+            .expect("Failed to parse Zenoh endpoint address");
 
         // static SESSION: static_cell::StaticCell<Session<'static, ZenohConfig>> =
         //     static_cell::StaticCell::new();
@@ -355,11 +368,13 @@ impl<const ID: u8> NerEth<ID> {
         //     SESSION.init(connect(resources, config, endpoint).await.unwrap());
 
         let builder = zenoh::session!(static ZenohConfig: ex);
-        let session = unwrap!(builder.connect(endpoint).await);
+        let Ok(session) = builder.connect(endpoint).await else {
+            return Err(NerEthError::ConnectionError);
+        };
 
-        spawner.spawn(session_task(session).unwrap());
+        spawner.spawn(session_task(session).expect("Failed to spawn nereth::session_task()."));
 
-        Some(NerEth::<ID> { session })
+        Ok(NerEth::<ID> { session })
     }
 
     /// Retreives a publisher to send data over a topic.
@@ -373,17 +388,16 @@ impl<const ID: u8> NerEth<ID> {
         let unit = unit.unwrap_or("");
         assert!(unit.len() < test.unit.capacity(), "Unit too big!");
 
-        match self
-            .session
-            .declare_publisher(expect!(keyexpr::new(key), "Invalid key expression"))
-            .finish()
-            .await
-        {
-            Ok(res) => Some(NerPublisher::new(res, unit)),
-            Err(e) => {
-                warn!("Could not create publisher: {}", e);
-                None
-            }
-        }
+        let Ok(keyexpr) = keyexpr::new(key) else {
+            warn!("Could not parse keyexpr: {}", key);
+            return None;
+        };
+
+        let Ok(publisher) = self.session.declare_publisher(keyexpr).finish().await else {
+            warn!("Could not create publisher: {}", key);
+            return None;
+        };
+
+        Some(NerPublisher::new(publisher, unit))
     }
 }
