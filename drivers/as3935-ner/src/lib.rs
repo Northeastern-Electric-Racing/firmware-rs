@@ -73,6 +73,27 @@ impl<SPI> As3935<SPI>
 
         self.write_register(reg, combined_register).await
     }
+
+    /// calibrates the chip's internal oscillators
+    pub async fn calibrate_rco(&mut self) -> Result<(), Error<SPI::Error>> {
+
+        self.write_register(Register::CalibRco, DIRECT_COMMAND).await
+    }
+
+    /// Reads why the IRQ pin fired: 0 = none, 1 = noise, 4 = disturber, 8 = lightning
+    pub async fn interrupt(&mut self) -> Result<u8, Error<SPI::Error>> {
+        self.read_field(Register::Frequency, 0, 4).await
+    }
+
+    /// Reads the distance to the storm in km: 1 = overhead, 63 = out of range
+    pub async fn distance(&mut self) -> Result<u8, Error<SPI::Error>> {
+        self.read_field(Register::DistanceEstimation, 0, 6).await
+    }
+
+    /// Sets indoor (0b10010) or outdoor (0b01110) mode
+    pub async fn set_afe(&mut self, setting: u8) -> Result<(), Error<SPI::Error>> {
+        self.write_field(Register::Config, 1, 5, setting).await
+    }
 }
 
 #[derive(Debug)]
