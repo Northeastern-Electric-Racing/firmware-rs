@@ -1,5 +1,20 @@
+use std::{env, path::PathBuf};
+
 fn main() {
     println!("cargo::rerun-if-changed=proto");
+
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+
+    // Replaces protoc: compile the .proto in pure Rust (same as -Iproto)
+    let fds = protox::Compiler::new(["proto"])
+        .unwrap()
+        .include_imports(true)
+        .open_files(["serverdata.proto"])
+        .unwrap()
+        .encode_file_descriptor_set();
+
+    let fds_path = out_dir.join("serverdata.fds");
+    std::fs::write(&fds_path, fds).unwrap();
 
     let mut generator = micropb_gen::Generator::new();
     generator
@@ -11,13 +26,9 @@ fn main() {
         .configure(
             ".serverdata.v2.ServerData.unit",
             micropb_gen::Config::new().max_bytes(18),
-        )
-        .add_protoc_arg("-Iproto");
-    // Compile example.proto into a Rust module
+        );
+
     generator
-        .compile_protos(
-            &["serverdata.proto"],
-            std::env::var("OUT_DIR").unwrap() + "/serverdata.rs",
-        )
+        .compile_fdset_file(&fds_path, out_dir.join("serverdata.rs"))
         .unwrap();
 }
