@@ -24,17 +24,18 @@ const DIRECT_COMMAND: u8 = 0x96;
 
 /// An AS3935 lightning sensor connected over SPI.
 pub struct As3935<SPI> {
-    spi: SPI
+    spi: SPI,
 }
 
 impl<SPI> As3935<SPI>
-    // this is a trait bound, its a requirement on what types are allowed
-    // "this impl only applies when SPI is a type that implements SpiDevice"
-    where SPI: SpiDevice,
+// this is a trait bound, its a requirement on what types are allowed
+// "this impl only applies when SPI is a type that implements SpiDevice"
+where
+    SPI: SpiDevice,
 {
     /// Creates the driver. Doesn't talk to the chip yet.
     pub fn new(spi: SPI) -> Self {
-        Self {spi}
+        Self { spi }
     }
 
     /// Reads one whole byte from a register on the chip.
@@ -43,7 +44,9 @@ impl<SPI> As3935<SPI>
         let command_byte = (reg as u8 & ADDRESS_MASK) | 0x40;
         let mut buf: [u8; 2] = [command_byte, 0x00];
 
-        SpiDevice::transfer_in_place(&mut self.spi, &mut buf).await.map_err(Error::Spi)?;
+        SpiDevice::transfer_in_place(&mut self.spi, &mut buf)
+            .await
+            .map_err(Error::Spi)?;
         Ok(buf[1])
     }
 
@@ -53,22 +56,29 @@ impl<SPI> As3935<SPI>
         let command_byte = (reg as u8 & ADDRESS_MASK) | 0x00; // write mode will always be 0x00 so the OR does nothing
         let buf: [u8; 2] = [command_byte, value];
 
-        SpiDevice::write(&mut self.spi, &buf).await.map_err(Error::Spi)?;
+        SpiDevice::write(&mut self.spi, &buf)
+            .await
+            .map_err(Error::Spi)?;
         Ok(())
     }
 
     /// Resets every register on the chip to its factory default value.
     /// Works by writing the magic value 0x96 to the PresetDefault register (a "direct command")
     pub async fn preset_default(&mut self) -> Result<(), Error<SPI::Error>> {
-
-        self.write_register(Register::PresetDefault, DIRECT_COMMAND).await
+        self.write_register(Register::PresetDefault, DIRECT_COMMAND)
+            .await
     }
 
     /// Reads a group of bits (a "field") out of one register, e.g. bits `[6:4]`.
     /// Reads the whole byte, slides the field down to the bottom (>> shift), then masks off the rest.
     ///
     /// `shift` is the field's lowest bit number, `width` is how many bits it has (1 to 7).
-    async fn read_field(&mut self, reg: Register, shift: u8, width: u8) -> Result<u8, Error<SPI::Error>> {
+    async fn read_field(
+        &mut self,
+        reg: Register,
+        shift: u8,
+        width: u8,
+    ) -> Result<u8, Error<SPI::Error>> {
         let register = self.read_register(reg).await?; // reads the passed reg argument
         let slide_right = register >> shift;
         let mask = (1 << width) - 1;
@@ -79,7 +89,13 @@ impl<SPI> As3935<SPI>
 
     /// Changes a group of bits inside one register without touching the other bits.
     /// Reads the byte, erases just the field's bits, puts the new value in their place, writes it back.
-    async fn write_field(&mut self, reg: Register, shift: u8, width: u8, value: u8) -> Result<(), Error<SPI::Error>> {
+    async fn write_field(
+        &mut self,
+        reg: Register,
+        shift: u8,
+        width: u8,
+        value: u8,
+    ) -> Result<(), Error<SPI::Error>> {
         let register = self.read_register(reg).await?;
         let mask = (1 << width) - 1;
         let erase = !(mask << shift);
@@ -93,8 +109,8 @@ impl<SPI> As3935<SPI>
     /// Calibrates the chip's internal RC oscillators.
     /// Works by writing the magic value 0x96 to the CalibRco register (a "direct command").
     pub async fn calibrate_rco(&mut self) -> Result<(), Error<SPI::Error>> {
-
-        self.write_register(Register::CalibRco, DIRECT_COMMAND).await
+        self.write_register(Register::CalibRco, DIRECT_COMMAND)
+            .await
     }
 
     /// Reads why the IRQ pin fired.
@@ -124,13 +140,13 @@ impl<SPI> As3935<SPI>
             0b111111 => Ok(Distance::OutOfRange),
             km => Ok(Distance::Km(km)),
         }
-
     }
 
     /// Sets the analog front-end gain for indoor or outdoor use.
     /// Only changes bits `[5:1]` of the Config register.
     pub async fn set_afe(&mut self, setting: Afe) -> Result<(), Error<SPI::Error>> {
-        self.write_field(Register::Config, 1, 5, setting as u8).await
+        self.write_field(Register::Config, 1, 5, setting as u8)
+            .await
     }
 
     /// Reads the energy of the last lightning strike.
@@ -146,8 +162,8 @@ impl<SPI> As3935<SPI>
         let energy_msb = energy_msb as u32;
         let energy_mmsb = energy_mmsb as u32;
 
-        let shift_mmsb = energy_mmsb << 16;
-        let shift_msb = energy_msb << 8;
+        let shift_mmsb = energy_mmsb << 16_u32;
+        let shift_msb = energy_msb << 8_u32;
 
         Ok(shift_mmsb | shift_msb | energy_lsb)
     }

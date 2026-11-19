@@ -8,6 +8,7 @@
 /// The lightning detection lookup table (0x09–0x32) is not used by this driver.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub(crate) enum Register {
     /// - [7:6] Reserved
     /// - [5:1] AFE gain boost (indoor/outdoor setting)
