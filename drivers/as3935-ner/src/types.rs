@@ -1,3 +1,6 @@
+use uom::si::f32::Length;
+use uom::si::length::kilometer;
+
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, defmt::Format)]
 pub enum Afe {
@@ -13,9 +16,20 @@ pub enum Interrupt {
     Lightning,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, defmt::Format)]
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Distance {
     Overhead,
     OutOfRange,
-    Km(u8),
+    Estimate(Length),
+}
+
+impl defmt::Format for Distance {
+    fn format(&self, f: defmt::Formatter) {
+        match self {
+            Distance::Overhead => defmt::write!(f, "overhead"),
+            Distance::OutOfRange => defmt::write!(f, "out of range"),
+            Distance::Estimate(d) => defmt::write!(f, "{} km", d.get::<kilometer>()),
+        }
+    }
 }

@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 defmt.workspace = true
 embedded-hal-async.workspace = true
+uom = { version = "0.38.0", default-features = false, features = ["si", "f32"] }
 
 [lints]
 workspace = true
