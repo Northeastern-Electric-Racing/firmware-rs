@@ -149,6 +149,17 @@ where
             .await
     }
 
+    /// getter method for afe meant for use after sensor setup
+    pub async fn afe(&mut self) -> Result<Afe, Error<SPI::Error>> {
+        let raw_afe = self.read_field(Register::Config, 1, 5).await?;
+
+        match raw_afe {
+            0b10010 => Ok(Afe::Indoor),
+            0b01110 => Ok(Afe::Outdoor),
+            other => Err(Error::UnknownValue(other)),
+        }
+    }
+
     /// Reads the energy of the last lightning strike.
     ///
     /// This is a raw 21-bit number with no physical unit; bigger means a stronger strike.
