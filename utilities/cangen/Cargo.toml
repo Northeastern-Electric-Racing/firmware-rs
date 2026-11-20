@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 bitfield-struct.workspace = true
 embedded-can.workspace = true
+defmt.workspace = true
 # not workspace as not thumbv8/no_std
 cangen-macro.path = "./cangen-macro"
 

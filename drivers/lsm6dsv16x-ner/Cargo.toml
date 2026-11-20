@@ -1,0 +1,15 @@
+[package]
+name = "lsm6dsv16x-ner"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+defmt.workspace = true
+embassy-time.workspace = true
+embedded-hal-async.workspace = true
+lsm6dsv16x-rs = "2.1.0"
+st-mems-bus = "2.0.0"
+uom = { version = "0.38.0", default-features = false, features = ["si", "f32"] }
+
+[lints]
+workspace = true

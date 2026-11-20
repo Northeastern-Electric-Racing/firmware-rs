@@ -170,7 +170,10 @@ impl NerCan {
                         if let Id::Standard(id2) = id2 {
                             std.filter = DedicatedDual(id1, id2);
                         } else {
-                            panic!("Provided extended ID message to id2");
+                            panic!(
+                                "Provided extended ID message to id2 at slot {}",
+                                filter.slot as u32
+                            );
                         }
                     }
                     None => {
@@ -178,7 +181,10 @@ impl NerCan {
                     }
                 }
             } else {
-                panic!("Provided extended ID message to id1");
+                panic!(
+                    "Provided extended ID message to id1 at slot {}",
+                    filter.slot as u32
+                );
             }
             std.action = Action::StoreInFifo0;
             self.can_configurator
@@ -210,7 +216,10 @@ impl NerCan {
                         if let Id::Extended(id2) = id2 {
                             ext.filter = DedicatedDual(id1, id2);
                         } else {
-                            panic!("Provided standard ID message to id2");
+                            panic!(
+                                "Provided standard ID message to id2 at slot {}E",
+                                filter.slot as u32
+                            );
                         }
                     }
                     None => {
@@ -218,7 +227,10 @@ impl NerCan {
                     }
                 }
             } else {
-                panic!("Provided standard ID message to id1");
+                panic!(
+                    "Provided standard ID message to id1 at slot {}E",
+                    filter.slot as u32
+                );
             }
             ext.action = Action::StoreInFifo0;
             self.can_configurator

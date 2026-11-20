@@ -59,21 +59,6 @@ pub trait ToCanFrame: CanMessage + Into<<Self as CanMessage>::Repr> {
     }
 }
 
-pub trait FromCanFrame: CanMessage + From<<Self as CanMessage>::Repr> {
-    fn from_can_frame<F: Frame>(frame: &F) -> Option<Self> {
-        let _: () = Self::CHECK;
-
-        if frame.is_remote_frame() || frame.id() != Self::ID || frame.data().len() != Self::LEN {
-            return None;
-        }
-        let mut bytes = <<Self as CanMessage>::Repr as CanRepr>::Bytes::default();
-        bytes.as_mut()[..Self::LEN].copy_from_slice(frame.data());
-        Some(Self::from(
-            <<Self as CanMessage>::Repr as CanRepr>::from_be_bytes(bytes),
-        ))
-    }
-}
-
 /// Error returned by the generated `try_with_*` / `try_set_*` accessors when a
 /// physical value can't be represented in a scaled field's bit width.
 ///
