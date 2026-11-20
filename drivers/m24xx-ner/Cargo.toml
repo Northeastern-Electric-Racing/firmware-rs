@@ -1,0 +1,18 @@
+[package]
+name = "m24xx-ner"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+defmt = { workspace = true, optional = true }
+embedded-hal.workspace = true
+embedded-hal-async.workspace = true
+embedded-storage-async = "0.4.2"
+m24xx-ner-macros = { path = "./m24xx-ner-macros" }
+
+[features]
+default = ["defmt"]
+defmt = ["dep:defmt"]
+
+[lints]
+workspace = true
