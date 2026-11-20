@@ -162,6 +162,37 @@ impl Flag {
     /// which is what this returns. Useful when you want the phase as sub-sample resolution rather
     /// than a separate value.
     pub const fn i1cntpha(&self) -> u16 {
-        (self.i1cnt() << 2) | self.i1pha() as u16
+        (self.i1cnt() << Self::PHASE_BITS) | self.i1pha() as u16
+    }
+
+    /// Width of the `I1PHA` phase field, in bits.
+    const PHASE_BITS: u16 = 2;
+
+    /// Phase ticks per conversion: `I1PHA` advances this many times per `I1CNT` increment.
+    ///
+    /// This is the factor [`Flag::i1cntpha`] shifts [`Flag::i1cnt`] by, so measuring a conversion
+    /// time from a phase delta means scaling by this.
+    pub const PHASES_PER_CONVERSION: u16 = 1 << Self::PHASE_BITS;
+
+    /// One past the largest value [`Flag::i1cnt`] returns -- where the 11-bit counter wraps.
+    pub const I1CNT_MODULUS: u16 = 1 << 11;
+
+    /// One past the largest value [`Flag::i1cntpha`] returns -- where the 13-bit counter wraps.
+    pub const I1CNTPHA_MODULUS: u16 = Self::I1CNT_MODULUS << Self::PHASE_BITS;
+
+    /// Phase ticks elapsed between two [`Flag::i1cntpha`] readings, accounting for rollover.
+    ///
+    /// The counter is 13 bits inside a `u16`, so it cannot be subtracted with `wrapping_sub`:
+    /// that would wrap at 2^16 instead. Readings are taken modulo
+    /// [`Flag::I1CNTPHA_MODULUS`] first, so any value is safe to pass.
+    ///
+    /// Only resolves a single wrap. More than one rollover between readings is indistinguishable
+    /// from none, so callers sampling slower than
+    /// `I1CNTPHA_MODULUS / PHASES_PER_CONVERSION` conversions need their own guard.
+    pub const fn i1cntpha_delta(earlier: u16, later: u16) -> u16 {
+        let earlier = earlier % Self::I1CNTPHA_MODULUS;
+        let later = later % Self::I1CNTPHA_MODULUS;
+
+        (later + Self::I1CNTPHA_MODULUS - earlier) % Self::I1CNTPHA_MODULUS
     }
 }

@@ -285,6 +285,16 @@ pub mod types {
         Samples32 = 0b111,
     }
 
+    impl AccumulatorDepth {
+        /// Samples the accumulators sum at this depth (`ACCN`).
+        ///
+        /// `ACCN = 4 * (ACCI + 1)` per Table 70. The IxACC and VBxACC registers hold a sum of this
+        /// many samples, so dividing by it is what turns one into an average.
+        pub const fn samples(self) -> u16 {
+            4 * (self as u16 + 1)
+        }
+    }
+
     /// Clock monitor diagnostic injection (INJOSC). Two-bit field.
     #[repr(u8)]
     #[bitenum]
