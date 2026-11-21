@@ -4,11 +4,7 @@
 //! to move it in and out of them. A scheme decides where those bytes live.
 
 /// A value that can be kept on a part.
-///
-/// All the driver asks of a payload. How you get there - by hand, by `#[derive]`,
-/// with `bitfield-struct` - is yours.
 pub trait Storable: Sized + Clone + PartialEq {
-    /// Encoded length in bytes.
     const LEN: usize;
 
     /// Write `Self::LEN` bytes into the front of `buf`.
@@ -25,14 +21,13 @@ pub const fn bytes_for(bits: usize) -> usize {
 
 /// A flag per channel, one bit each.
 ///
-/// Sized in bytes because an array length cannot be computed from a const generic on
-/// stable: `BitMask<{ bytes_for(184) }>`.
+/// Sized in bytes.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct BitMask<const BYTES: usize>([u8; BYTES]);
 
 impl<const BYTES: usize> BitMask<BYTES> {
-    /// Every flag clear.
+    /// Every flag starts clear.
     pub const fn new() -> Self {
         Self([0u8; BYTES])
     }

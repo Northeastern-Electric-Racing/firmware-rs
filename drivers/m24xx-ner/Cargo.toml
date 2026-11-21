@@ -6,8 +6,8 @@ edition = "2024"
 [dependencies]
 defmt = { workspace = true, optional = true }
 embedded-hal.workspace = true
+crc = { version = "3.3", default-features = false }
 embedded-hal-async.workspace = true
-embedded-storage-async = "0.4.2"
 m24xx-ner-macros = { path = "./m24xx-ner-macros" }
 
 [features]
