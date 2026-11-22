@@ -93,6 +93,7 @@ use embassy_stm32::mode::Blocking;
 use embassy_stm32::peripherals;
 use embassy_stm32::{Peri, bind_interrupts, rng};
 use embassy_sync::blocking_mutex::{Mutex as BlockingMutex, raw::ThreadModeRawMutex};
+use embassy_sync::channel::{DynamicReceiver, DynamicSender};
 use micropb::{MessageEncode, PbEncoder, size::max_encoded_size};
 use static_cell::StaticCell;
 use zenoh_embassy::EmbassyLinkManager;
@@ -443,5 +444,31 @@ impl<const ID: u8> NerEth<ID> {
         };
 
         Some(NerPublisher::new(publisher, unit))
+    }
+
+    pub async fn get_subscriber<'a>(
+        &'a self,
+        key: &'static str,
+        sender: DynamicSender<'static, FixedCapacitySample<128, 128>>,
+        receiver: DynamicReceiver<'static, FixedCapacitySample<128, 128>>,
+    ) -> Option<Subscriber<'a, 'static, ZenohConfig, FixedCapacitySample<128, 128>, true>>
+    {
+        let Ok(keyexpr) = keyexpr::new(key) else {
+            warn!("Could not parse keyexpr: {}", key);
+            return None;
+        };
+
+        let Ok(subscriber) = self
+            .session
+            .declare_subscriber(keyexpr)
+            .channel(sender, receiver)
+            .finish()
+            .await
+        else {
+            warn!("Could not create subscriber: {}", key);
+            return None;
+        };
+
+        Some(subscriber)
     }
 }
