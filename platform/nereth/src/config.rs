@@ -1,6 +1,5 @@
 use crate::ZenohConfig;
 use atomic_float::AtomicF32;
-use zenoh_nostd::session::zenoh::{error, info, keyexpr};
 use core::str::from_utf8;
 use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use core::time::Duration;
@@ -8,6 +7,7 @@ use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::Channel;
 use phf::phf_map;
 use static_cell::StaticCell;
+use zenoh_nostd::session::zenoh::{error, info, keyexpr};
 use zenoh_nostd::session::*;
 
 // Each param starts at its default and is overwritten when zenoh sends a value
