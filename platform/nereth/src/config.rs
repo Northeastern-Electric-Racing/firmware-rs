@@ -1,3 +1,4 @@
+use crate::ZenohConfig;
 use atomic_float::AtomicF32;
 use core::str::from_utf8;
 use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
@@ -7,7 +8,6 @@ use embassy_sync::channel::Channel;
 use phf::phf_map;
 use static_cell::StaticCell;
 use zenoh_nostd::session::*;
-use crate::ZenohConfig;
 
 // Each param starts at its default and is overwritten when zenoh sends a value
 pub static MAX_TORQ: IntData = IntData::new(0);
@@ -23,7 +23,7 @@ static PARAMS: phf::Map<&'static str, &'static (dyn Param + Sync)> = phf_map! {
 };
 
 /// Every param key must live under this prefix so one query + one subscriber covers them all
-pub const KEY_EXPR: &str = "NERData/**";
+pub const PATH: &str = "NERData/**";
 
 /// Shared behaviour so query replies and subscriber samples can update any param type
 trait Param {
@@ -151,14 +151,14 @@ pub async fn run(session: &'static Session<'static, ZenohConfig>) -> zenoh::ZRes
 
     // Subscribe first so no update published during the query gets missed
     let subscriber = session
-        .declare_subscriber(zenoh::keyexpr::new(KEY_EXPR)?)
+        .declare_subscriber(zenoh::keyexpr::new(PATH)?)
         .channel(channel.dyn_sender(), channel.dyn_receiver())
         .finish()
         .await?;
 
     // Startup query for whatever values already exist
     let querier = session
-        .declare_querier(zenoh::keyexpr::new(KEY_EXPR)?)
+        .declare_querier(zenoh::keyexpr::new(PATH)?)
         .timeout(Duration::from_secs(1))
         .finish()
         .await?;
