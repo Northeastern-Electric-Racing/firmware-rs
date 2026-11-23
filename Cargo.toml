@@ -11,7 +11,8 @@ defmt = "1"
 embedded-hal = { version = "1" }
 embedded-hal-async = { version = "1" }
 embedded-can = "0.4.1"
-bitfield-struct = "0.13"
+bitfield-struct = "0.13" 
+atomic_float = "1.1.0"
 
 bisync = "0.3" # Dev yanked this; patched to the archived repo below
 device-driver = { version = "1.0.9" }

@@ -108,6 +108,8 @@ mod serverdata {
     include!(concat!(env!("OUT_DIR"), "/serverdata.rs"));
 }
 
+mod config;
+
 pub type ServerData = serverdata::serverdata_::v2_::ServerData;
 
 const CAPACITY: usize = max_encoded_size::<ServerData>().next_power_of_two();
@@ -417,6 +419,7 @@ impl<const ID: u8> NerEth<ID> {
         };
 
         spawner.spawn(session_task(session).expect("Failed to spawn nereth::session_task()."));
+        spawner.spawn(config::config_task(session).expect("Failed to spawn config::config_task()"));
 
         Ok(NerEth::<ID> { session })
     }
