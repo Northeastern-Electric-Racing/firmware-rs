@@ -1,5 +1,6 @@
 use crate::ZenohConfig;
 use atomic_float::AtomicF32;
+use zenoh_nostd::session::zenoh::{error, info, keyexpr};
 use core::str::from_utf8;
 use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use core::time::Duration;
@@ -120,14 +121,14 @@ fn handle_update(key: &str, payload: &[u8]) {
     match PARAMS.get(key) {
         Some(p) => {
             if !p.update(payload) {
-                zenoh::error!(
+                error!(
                     "[Config] Couldn't parse value for '{}': {:?}",
                     key,
                     from_utf8(payload)
                 );
             }
         }
-        None => zenoh::info!("[Config] Ignoring unknown key '{}'", key),
+        None => info!("[Config] Ignoring unknown key '{}'", key),
     }
 }
 
@@ -135,7 +136,7 @@ fn handle_update(key: &str, payload: &[u8]) {
 fn on_query_reply(resp: &GetResponse<'_>) {
     match resp {
         GetResponse::Ok(reply) => handle_update(reply.keyexpr().as_str(), reply.payload()),
-        GetResponse::Err(reply) => zenoh::error!(
+        GetResponse::Err(reply) => error!(
             "[Config] Query error from '{}': {:?}",
             reply.keyexpr().as_str(),
             from_utf8(reply.payload())
@@ -144,29 +145,51 @@ fn on_query_reply(resp: &GetResponse<'_>) {
 }
 
 /// Queries every param once, then keeps them updated from a subscriber
-pub async fn run(session: &'static Session<'static, ZenohConfig>) -> zenoh::ZResult<()> {
+#[embassy_executor::task]
+pub async fn config_task(session: &'static Session<'static, ZenohConfig>) {
     static CHANNEL: StaticCell<Channel<NoopRawMutex, FixedCapacitySample<128, 128>, 8>> =
         StaticCell::new();
     let channel: &'static _ = CHANNEL.init(Channel::new());
 
+    let ke = match keyexpr::new(PATH) {
+        Ok(ke) => ke,
+        Err(e) => {
+            error!("[Config] Invalid key expression '{}': {}", PATH, e);
+            return;
+        }
+    };
+
     // Subscribe first so no update published during the query gets missed
-    let subscriber = session
-        .declare_subscriber(zenoh::keyexpr::new(PATH)?)
+    let subscriber = match session
+        .declare_subscriber(ke)
         .channel(channel.dyn_sender(), channel.dyn_receiver())
         .finish()
-        .await?;
+        .await
+    {
+        Ok(sub) => sub,
+        Err(e) => {
+            error!("[Config] Couldn't declare subscriber: {}", e);
+            return;
+        }
+    };
 
     // Startup query for whatever values already exist
-    let querier = session
-        .declare_querier(zenoh::keyexpr::new(PATH)?)
+    match session
+        .declare_querier(ke)
         .timeout(Duration::from_secs(1))
         .finish()
-        .await?;
-    querier.get().callback_sync(on_query_reply).finish().await?;
+        .await
+    {
+        Ok(querier) => {
+            if let Err(e) = querier.get().callback_sync(on_query_reply).finish().await {
+                error!("[Params] Startup query failed, using defaults: {}", e);
+            }
+        }
+        Err(e) => error!("[Params] Couldn't declare querier, using defaults: {}", e),
+    }
 
-    // Update atomic values based on subcriber recieving new data
+    // Live updates
     while let Some(sample) = subscriber.recv().await {
         handle_update(sample.keyexpr().as_str(), sample.payload());
     }
-    Ok(())
 }

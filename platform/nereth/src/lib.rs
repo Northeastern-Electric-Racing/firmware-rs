@@ -419,6 +419,7 @@ impl<const ID: u8> NerEth<ID> {
         };
 
         spawner.spawn(session_task(session).expect("Failed to spawn nereth::session_task()."));
+        spawner.spawn(config::config_task(session).expect("Failed to spawn config::config_task()"));
 
         Ok(NerEth::<ID> { session })
     }
