@@ -108,6 +108,8 @@ mod serverdata {
     include!(concat!(env!("OUT_DIR"), "/serverdata.rs"));
 }
 
+mod config;
+
 pub type ServerData = serverdata::serverdata_::v2_::ServerData;
 
 const CAPACITY: usize = max_encoded_size::<ServerData>().next_power_of_two();

@@ -10,10 +10,12 @@ embassy-executor.workspace = true
 embassy-sync.workspace = true
 static_cell.workspace = true
 defmt.workspace = true
+atomic_float.workspace = true
 
 getrandom = { version = "0.2", default-features = false, features = ["custom"] }
 zenoh-nostd = { git = "https://github.com/Northeastern-Electric-Racing/zenoh-nostd", rev = "4efdaa2b9fa443784723dc0da2e31219beac5a1f", features = ["embedded", "defmt"] }
 zenoh-embassy = { git = "https://github.com/Northeastern-Electric-Racing/zenoh-nostd", rev = "4efdaa2b9fa443784723dc0da2e31219beac5a1f" }
+phf = { version = "0.11", default-features = false, features = ["macros"] }
 
 micropb = { version = "0.7.0", features = ["container-heapless-0-9"] }
 heapless = "0.9"
