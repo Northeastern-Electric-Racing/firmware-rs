@@ -194,6 +194,34 @@ impl<'a> NerPublisher<'a> {
     }
 }
 
+pub struct NerSubscriber<'a> {
+    subscriber: Subscriber<'a, 'static, ZenohConfig, FixedCapacitySample<128, 128>, true>,
+    last: Option<FixedCapacitySample<128, 128>>,
+}
+
+pub struct NerMessage<'a> {
+    pub keyexpr: &'a str,
+    pub payload: &'a [u8],
+}
+
+impl<'a> NerSubscriber<'a> {
+    pub(crate) fn new(
+        subscriber: Subscriber<'a, 'static, ZenohConfig, FixedCapacitySample<128, 128>, true>,
+    ) -> Self {
+        NerSubscriber { subscriber, last: None }
+    }
+
+    /// Receives a message. Returns None on failure.
+    pub async fn receive(&mut self) -> Option<NerMessage<'_>> {
+        let sample = self.subscriber.recv().await?;
+        let sample = self.last.insert(sample);
+        Some(NerMessage {
+            keyexpr: sample.keyexpr(),
+            payload: sample.payload(),
+        })
+    }
+}
+
 type LinkManager = EmbassyLinkManager<'static, 512, 3>;
 
 pub struct NerEth<const ID: u8> {
@@ -451,8 +479,7 @@ impl<const ID: u8> NerEth<ID> {
         key: &'static str,
         sender: DynamicSender<'static, FixedCapacitySample<128, 128>>,
         receiver: DynamicReceiver<'static, FixedCapacitySample<128, 128>>,
-    ) -> Option<Subscriber<'a, 'static, ZenohConfig, FixedCapacitySample<128, 128>, true>>
-    {
+    ) -> Option<NerSubscriber<'a>> {
         let Ok(keyexpr) = keyexpr::new(key) else {
             warn!("Could not parse keyexpr: {}", key);
             return None;
@@ -469,6 +496,6 @@ impl<const ID: u8> NerEth<ID> {
             return None;
         };
 
-        Some(subscriber)
+        Some(NerSubscriber::new(subscriber))
     }
 }
