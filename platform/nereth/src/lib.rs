@@ -1,61 +1,104 @@
 #![no_std]
-//! The NER Ethernet Handler.
-//! Takes in an ethernet peripheral and pins, and handles all setup.
-//! The NER Ethernet stack currently includes a LAN8670 running in PLCA mode.
-//! On top of the PLCA mode we run Zenoh to communicate data.
-//! We also run PTP over UDP to synchronize time effectively.
+//! NER Ethernet handler.
 //!
-//! ## ID
-//! The generic ID sources the various identifiers:
-//!  - The IP is `10.0.0.ID`
-//!  - The mac is `06:00:00:00:00:ID`
-//!  - The PLCA node is `ID-1`
+//! Takes the STM32 Ethernet peripheral and pins and brings up the whole stack:
 //!
-//! Therefore an ID of 0 is disallowed, and an ID of one assumes PLCA coordinator.
+//! - **PHY:** a Microchip LAN8670 (10BASE-T1S) configured for PLCA.
+//! - **Network:** `embassy-net` with a static IPv4 address on `10.0.0.0/24`.
+//! - **Messaging:** a Zenoh client session over UDP to the TPU at `10.0.0.1:7447`.
+//!   Payloads are protobuf `ServerData` messages encoded with `micropb`.
 //!
+//! Timestamps are not set yet (`time_us` is always 0). PTP time sync is planned.
 //!
-//! Example initilization of ethernet using this crate's utilities:
+//! # Node ID
+//!
+//! The const generic `ID` sets every per-node identifier:
+//!
+//! | Identifier | Value                                      |
+//! |------------|--------------------------------------------|
+//! | IPv4       | `10.0.0.ID`                                |
+//! | MAC        | `06:00:00:00:00:ID` (locally administered) |
+//! | PLCA node  | `ID - 1`                                   |
+//!
+//! `ID` must be between 1 and 8 (the PLCA node count). ID 1 is PLCA node 0,
+//! the coordinator.
+//!
+//! # Usage
+//!
+//! 1. Reset the PHY. This crate does not do it, and the board may be warm
+//!    booting with the PHY in an unknown state.
+//! 2. Call [`NerEth::new`] once. It spawns the network and Zenoh session tasks.
+//! 3. Declare the node's topics with [`topics!`] and create their publishers
+//!    with `Topic::publishers`.
+//! 4. Publish from a single task that owns the publishers, and feed it from the
+//!    rest of the firmware through a channel.
+//!
+//! ```ignore
+//! use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
+//! use nereth::{NerEth, topics};
+//!
+//! topics! {
+//!     Acceleration => "VCU_Ethernet/A/Acceleration", "mg";
+//!     Gyro         => "VCU_Ethernet/A/Gyro",         "mdps";
+//! }
+//!
+//! // Other tasks drop packets in here. `try_send` never blocks, so a dead or
+//! // missing Ethernet link can't stall them; packets are just dropped.
+//! pub static OUTGOING: Channel<CriticalSectionRawMutex, Packet<3>, 8> = Channel::new();
+//!
+//! pub fn try_publish(topic: Topic, values: [f32; 3]) -> bool {
+//!     OUTGOING.try_send(Packet { topic, values }).is_ok()
+//! }
+//!
+//! // `r` is the board's struct of Ethernet peripherals and pins.
+//! #[embassy_executor::task]
+//! async fn ethernet_task(spawner: Spawner, r: EthernetResources) {
+//!     // Hold the PHY in reset for 500 ms.
+//!     let mut phy_reset = Output::new(r.phy_reset, Level::Low, Speed::Low);
+//!     Timer::after_millis(500).await;
+//!     phy_reset.set_high();
+//!
+//!     let Ok(eth) = NerEth::<4>::new(
+//!         spawner, r.rng, r.eth, r.ref_clk, r.crs, r.rx_d0, r.rx_d1,
+//!         r.tx_d0, r.tx_d1, r.tx_en, r.sma, r.mdio, r.mdc,
+//!     )
+//!     .await
+//!     else {
+//!         defmt::error!("Ethernet init failed; running without Ethernet");
+//!         return;
+//!     };
+//!
+//!     // One publisher per topic, in declaration order.
+//!     let mut publishers = Topic::publishers(&eth).await;
+//!
+//!     loop {
+//!         let packet = OUTGOING.receive().await;
+//!         // Failures are logged inside `send_values`.
+//!         let _ = publishers[packet.topic as usize]
+//!             .send_values(packet.values)
+//!             .await;
+//!     }
+//! }
 //! ```
-//! // First the PHY must be reset -- this handler does not take care of that.
-//! // Make sure to reset on boot, as this might not be a cold boot
-//! let mut phy_reset = Output::new(p.PE10, Level::Low, Speed::Low);
-//! phy_reset.set_low();
-//! Timer::after_millis(500).await;
-//! phy_reset.set_high();
-//!
-//! // Now we initialize the stack
-//!
-//! let nereth = nereth::NerEth::<1>::new(
-//! _spawner, p.RNG, p.ETH, p.PA1, p.PA7, p.PC4, p.PC5, p.PB12, p.PB15, p.PA5,
-//! p.ETH_SMA, p.PA2, p.PC1).await;
-//!
-//!
-//! // Use the returned object to retrieve the data channels for rx/tx and get time
-//!
-//! ```
-//!
-//!
-//!
 
 use core::{cell::RefCell, str::FromStr};
 
-use defmt::{error, expect, unwrap, warn};
+use defmt::{error, warn};
 use embassy_executor::Spawner;
 use embassy_net::{StackStorage, StaticPool, wire::IpCidr};
 use embassy_stm32::eth::{self, CRSPin, Ethernet, GenericPhy};
 use embassy_stm32::eth::{MDCPin, MDIOPin, RXD0Pin, RXD1Pin, RefClkPin};
 use embassy_stm32::eth::{Sma, StationManagement, TXD0Pin, TXD1Pin, TXEnPin};
 use embassy_stm32::mode::Blocking;
-use embassy_stm32::peripherals::{self, ETH_SMA};
+use embassy_stm32::peripherals;
 use embassy_stm32::{Peri, bind_interrupts, rng};
 use embassy_sync::blocking_mutex::{Mutex as BlockingMutex, raw::ThreadModeRawMutex};
 use micropb::{MessageEncode, PbEncoder, size::max_encoded_size};
 use static_cell::StaticCell;
 use zenoh_embassy::EmbassyLinkManager;
-use zenoh_nostd::session::{
-    zenoh::{keyexpr, storage::RawOrBox},
-    *,
-};
+use zenoh_nostd::session::zenoh::keyexpr;
+use zenoh_nostd::session::zenoh::storage::RawOrBox;
+use zenoh_nostd::session::*;
 
 mod serverdata {
     #![allow(clippy::all)]
@@ -69,7 +112,7 @@ pub type ServerData = serverdata::serverdata_::v2_::ServerData;
 
 const CAPACITY: usize = max_encoded_size::<ServerData>().next_power_of_two();
 
-type Device = Ethernet<'static, peripherals::ETH, GenericPhy<Sma<'static, ETH_SMA>>>;
+type Device = Ethernet<'static, peripherals::ETH, GenericPhy<Sma<'static, peripherals::ETH_SMA>>>;
 
 // max PLCA nodes (coordinator MUST set this number)
 const MAX_NODES: u8 = 8;
@@ -150,7 +193,7 @@ impl<'a> NerPublisher<'a> {
     }
 }
 
-type LinkManager = zenoh_embassy::EmbassyLinkManager<'static, 512, 3>;
+type LinkManager = EmbassyLinkManager<'static, 512, 3>;
 
 pub struct NerEth<const ID: u8> {
     session: &'static Session<'static, ZenohConfig>,
@@ -162,9 +205,9 @@ pub struct ZenohConfig {
 
 const BUFF_SIZE: u16 = 512u16;
 impl ZSessionConfig for ZenohConfig {
-    type LinkManager = LinkManager;
-
     type Buff = [u8; BUFF_SIZE as usize];
+
+    type LinkManager = LinkManager;
 
     type SubCallbacks<'res> = FixedCapacitySubCallbacks<'res, 8, RawOrBox<56>, RawOrBox<600>>;
 
@@ -221,12 +264,11 @@ macro_rules! topics {
         impl Topic {
             pub const COUNT: usize = [$(stringify!($name)),*].len();
 
-            async fn publishers<const ID: u8>(eth: &$crate::NerEth<ID>) -> [$crate::NerPublisher<'static>; Self::COUNT] {
-                [$(
-                    eth.get_publisher($key, Some($unit))
-                        .await
-                        .unwrap_or_else(|| defmt::panic!("Failed to create publisher for {}", $key)),
-                )*]
+            async fn publishers<const ID: u8>(eth: &$crate::NerEth<ID>)
+                -> Option<[$crate::NerPublisher<'static>; Self::COUNT]> {
+                Some([$(
+                    eth.get_publisher($key, Some($unit)).await?,
+                )*])
             }
         }
 
@@ -235,6 +277,14 @@ macro_rules! topics {
             pub values: [f32; SIZE],
         }
     };
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, defmt::Format)]
+pub enum NerEthError {
+    EthernetInitError,
+    DeviceInitError,
+    SetIpError,
+    ConnectionError,
 }
 
 impl<const ID: u8> NerEth<ID> {
@@ -260,7 +310,7 @@ impl<const ID: u8> NerEth<ID> {
         sma: Peri<'static, peripherals::ETH_SMA>,
         mdio: Peri<'static, impl MDIOPin<peripherals::ETH_SMA>>,
         mdc: Peri<'static, impl MDCPin<peripherals::ETH_SMA>>,
-    ) -> Option<Self> {
+    ) -> Result<Self, NerEthError> {
         static PACKETS: StaticCell<eth::PacketQueue<8, 8>> = StaticCell::new();
 
         let mut rng = rng::Rng::new_blocking(peri_rand);
@@ -273,7 +323,7 @@ impl<const ID: u8> NerEth<ID> {
         // for private networks this is chill
         let mac_addr: [u8; 6] = [0x6, 0x0, 0x0, 0x0, 0x0, ID];
 
-        let mut device = match eth::Ethernet::new(
+        let mut device = match Ethernet::new(
             PACKETS.init(eth::PacketQueue::<8, 8>::new()),
             peri_eth,
             ref_clk,
@@ -292,7 +342,7 @@ impl<const ID: u8> NerEth<ID> {
             Ok(o) => o,
             Err(e) => {
                 error!("Could not initialize ethernet! {}", e);
-                return None;
+                return Err(NerEthError::EthernetInitError);
             }
         };
 
@@ -331,14 +381,20 @@ impl<const ID: u8> NerEth<ID> {
 
         // Add the network interface to the stack.
         static DEVICE: StaticCell<Device> = StaticCell::new();
-        let iface = unwrap!(stack.add_iface_borrowed(DEVICE.init(device)));
+        let Ok(iface) = stack.add_iface_borrowed(DEVICE.init(device)) else {
+            return Err(NerEthError::DeviceInitError);
+        };
         // We run our network on 10.0.0.0/24
-        unwrap!(
-            iface.set_ip_addrs([IpCidr::new(embassy_net::wire::IpAddr::v4(10, 0, 0, ID), 24,)])
-        );
+
+        if iface
+            .set_ip_addrs([IpCidr::new(embassy_net::wire::IpAddr::v4(10, 0, 0, ID), 24)])
+            .is_err()
+        {
+            return Err(NerEthError::SetIpError);
+        }
 
         // Launch network task
-        spawner.spawn(net_task(runner).unwrap());
+        spawner.spawn(net_task(runner).expect("Failed to spawn embassy_net::net_task()."));
 
         // ZENOH ---------------------------------------------------------------
         let ex = ZenohConfig {
@@ -347,7 +403,8 @@ impl<const ID: u8> NerEth<ID> {
         // For now we UDP client all to TPU, making TPU required
         // this also makes inter-firmware comms NON-CRITICAL over Zenoh
         // TODO: peer connectivity or appoint critical node host (ex. VCU)
-        let endpoint = Endpoint::try_from("udp/10.0.0.1:7447").unwrap();
+        let endpoint = Endpoint::try_from("udp/10.0.0.1:7447")
+            .expect("Failed to parse Zenoh endpoint address");
 
         // static SESSION: static_cell::StaticCell<Session<'static, ZenohConfig>> =
         //     static_cell::StaticCell::new();
@@ -355,11 +412,13 @@ impl<const ID: u8> NerEth<ID> {
         //     SESSION.init(connect(resources, config, endpoint).await.unwrap());
 
         let builder = zenoh::session!(static ZenohConfig: ex);
-        let session = unwrap!(builder.connect(endpoint).await);
+        let Ok(session) = builder.connect(endpoint).await else {
+            return Err(NerEthError::ConnectionError);
+        };
 
-        spawner.spawn(session_task(session).unwrap());
+        spawner.spawn(session_task(session).expect("Failed to spawn nereth::session_task()."));
 
-        Some(NerEth::<ID> { session })
+        Ok(NerEth::<ID> { session })
     }
 
     /// Retreives a publisher to send data over a topic.
@@ -373,17 +432,16 @@ impl<const ID: u8> NerEth<ID> {
         let unit = unit.unwrap_or("");
         assert!(unit.len() < test.unit.capacity(), "Unit too big!");
 
-        match self
-            .session
-            .declare_publisher(expect!(keyexpr::new(key), "Invalid key expression"))
-            .finish()
-            .await
-        {
-            Ok(res) => Some(NerPublisher::new(res, unit)),
-            Err(e) => {
-                warn!("Could not create publisher: {}", e);
-                None
-            }
-        }
+        let Ok(keyexpr) = keyexpr::new(key) else {
+            warn!("Could not parse keyexpr: {}", key);
+            return None;
+        };
+
+        let Ok(publisher) = self.session.declare_publisher(keyexpr).finish().await else {
+            warn!("Could not create publisher: {}", key);
+            return None;
+        };
+
+        Some(NerPublisher::new(publisher, unit))
     }
 }
