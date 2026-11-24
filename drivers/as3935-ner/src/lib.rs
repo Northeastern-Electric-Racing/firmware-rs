@@ -57,7 +57,7 @@ where
         reg: Register,
         value: u8,
     ) -> Result<(), As3935Error<SPI::Error>> {
-        let command_byte = (reg as u8 & ADDRESS_MASK);
+        let command_byte = reg as u8 & ADDRESS_MASK;
         let buf: [u8; 2] = [command_byte, value];
 
         SpiDevice::write(&mut self.spi, &buf)
