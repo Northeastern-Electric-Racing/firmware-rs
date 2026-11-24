@@ -16,7 +16,6 @@ pub enum Interrupt {
     Lightning,
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Distance {
     Overhead,
