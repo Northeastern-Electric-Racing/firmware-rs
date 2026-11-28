@@ -13,14 +13,14 @@ over CAN to the ECU's custom bootloader and reports firmware update progress.
    cargo build --release
    ```
 
-2. Source the environment script from Bash or Zsh to add the `can` command:
+2. Add an alias to `~/.bashrc` (Bash) or `~/.zshrc` (Zsh) that sources the
+   environment script:
 
    ```sh
-   source <path-to-firmware-rs>/utilities/can-flash-cli/can-flash-env.sh
+   alias canenv='source <path-to-firmware-rs>/utilities/can-flash-cli/can-flash-env.sh'
    ```
 
-   Add this line to `~/.bashrc` (Bash) or `~/.zshrc` (Zsh) to keep `can` available
-   in new shells.
+   Run `canenv` in a new shell before using `can` commands.
 
 ## Usage
 
